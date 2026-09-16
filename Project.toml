@@ -2,7 +2,6 @@ name = "Project1"
 uuid = "a87ea0c4-effc-4c39-b324-814a8a71756c"
 authors = [
   # use one line per author to ease conflict resolution
-  "Your Name <your.name@example.com>",
  "Nikita <nikita.zaplavskyi@stud.klu.org>",
 "Philip Matern <philip.matern@stud.klu.org>",
 "Nicolas Lorenz <nicolas.lorenz@stud.klu.org>",  
