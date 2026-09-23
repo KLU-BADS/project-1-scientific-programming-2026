@@ -10,9 +10,7 @@ Split `df` into a training and a test set. `df` itself is not changed and both s
 
 Returns a DataFrame `df_training` containing the training data and DataFrame `df_test` containing the testing data.
 
-```jldoctest
-
-```
+<!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
 function split_dataset(df::DataFrame, test_size::Real; random_selection::Bool = true, seed::Union{Int,Nothing} = nothing)
     
