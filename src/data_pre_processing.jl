@@ -34,7 +34,7 @@ end
     convert_value(value, T)
 
 Convert a single value to type `T` while preserving missing values. Used by set_types!() to convert the values 
-    of a column to the requested type. Missing values stay missing, text like "\$1,250.00" is cleaned before it is parsed.
+    of a column to the requested type. Missing values stay missing, text like `"\$1,250.00"` is cleaned before it is parsed.
 
 # Arguments
 - `value`:      Raw value to convert.
