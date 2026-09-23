@@ -60,6 +60,7 @@ const CONFIG = (
             "EUR" => 1.0,
         # add one line per new currency, e.g. "USD" => 0.92
         # rates as of <date>, source: <e.g. ECB reference rate>
+        ),
     ),
 
     # Configuration for remove_duplicates!(): reference column for the removal of duplicates.
