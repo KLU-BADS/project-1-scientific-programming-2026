@@ -14,11 +14,7 @@ Excecute the program.
 
 Returns `nothing`.
 
-# Examples
-
-```jldoctest
-
-```
+<!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
 function main()
     #df_processed = run_training_pipeline()

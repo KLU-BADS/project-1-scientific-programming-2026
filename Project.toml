@@ -1,8 +1,8 @@
 name = "Project1"
 uuid = "a87ea0c4-effc-4c39-b324-814a8a71756c"
 authors = [
-  # use one line per author to ease conflict resolution
- "Nikita <nikita.zaplavskyi@stud.klu.org>",
+# use one line per author to ease conflict resolution
+"Nikita <nikita.zaplavskyi@stud.klu.org>",
 "Philip Matern <philip.matern@stud.klu.org>",
 "Nicolas Lorenz <nicolas.lorenz@stud.klu.org>",  
 "Carl Schmidt-Didlaukies <carl.schmidt-didlaukies@stud.klu.org>"
@@ -15,5 +15,17 @@ version = "0.1.0"
 [workspace]
 projects = ["docs", "test"]
 
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+GLM = "38e38edf-8417-5370-95a0-9cbb8c7f171a"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+
 [compat]
+CSV = "0.10, 1"
+DataFrames = "1"
+GLM = "1"
+Random = "1"
+Statistics = "1"
 julia = "1.12"

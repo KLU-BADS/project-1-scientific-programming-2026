@@ -1,4 +1,4 @@
-# Project1.jl
+# HostWise.jl
 
 <!-- DO NOT EDIT BELOW -->
 [![Tests](../../actions/workflows/tests.yml/badge.svg)](../../actions/workflows/tests.yml)
@@ -9,9 +9,7 @@
 ## Overview
 
 <!-- DESCRIBE PROJECT PURPOSE BELOW -->
-Our first idea is to use a regression model on a data set to create a model projecting demand and pricing. We considered the possibility of using a data set on hotel bookings and use factors including number of rooms booked on each day, room prices, and customer reviews as the input for a regression model and provide pricing recommendations and give the main reasons that influence the room price including the location, cleanliness of the room, amenities, etc for a certain hotel to give an insight into possible improvements a hotel owner could make to increase the profit per room. 
-
-We have expanded on this idea by focusing in on AirBNB's within a specific city and using the data to provide a regression estimate for appropriate prices within a region
+This project uses Inside Airbnb listing data, starting with Athens, Greece, with the design allowing more cities to be added later, to estimate a fair nightly price and expected yearly revenue for an apartment, based on features like bedrooms, bathrooms, amenities and location, plus host details like superhost status. It's aimed at hosts and investors deciding what to charge or whether to list a property, and at guests checking whether a listing is priced fairly.
 <!-- DESCRIBE PROJECT PURPOSE ABOVE  -->
 
 ## Getting started

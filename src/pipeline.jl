@@ -8,9 +8,7 @@ and outliers,  create dummies, ratios and the distance to the city center. Every
 
 Returns processed listing as DataFrame `df`.
 
-```jldoctest
-
-```
+<!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
 function run_training_pipeline(filepath::String = CONFIG.filepath)
     df = import_csv(filepath)
@@ -64,9 +62,7 @@ Run data pre-processing pipeline for the user input about a sigle apartment for 
 
 Returns processed user input as DataFrame `df`.
 
-```jldoctest
-
-```
+<!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
 function run_inference_pipeline()
 
