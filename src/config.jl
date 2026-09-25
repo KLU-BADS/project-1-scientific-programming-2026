@@ -16,15 +16,14 @@ const PROJECT_ROOT = normpath(joinpath(@__DIR__, ".."))
 # uses the RAW names from listings.csv.
 const CONFIG = (
     # Filepath for the import fuction for the listings.csv data file located in data/raw
-    filepath = joinpath(PROJECT_ROOT, "data", "raw", "listings.csv"),
-    city = "Barcelona",                     # key into `cities`, selects the city center for calculate_distance!()
+    filepath = joinpath(PROJECT_ROOT, "data", "raw", lowercase(city) * "_listings.csv"),
+    city = "Athens",                     # key into `cities`, selects the city center for calculate_distance!()
 
     # Configuration for filter_columns(): raw columns needed to build every variable of the regression model.
     relevant_columns = [
         :id,                                # only used to remove duplicates
         :room_type, :accommodates,          # basic facts
         :beds, :bedrooms, :bathrooms, :bathrooms_text,   # -> ratios (bathrooms_text fills missing bathrooms)
-        :neighbourhood_group_cleansed,      # -> location_10_bureaus (the 10 districts of Barcelona)
         :latitude, :longitude,              # -> proximity_city_center
         :amenities,                         # -> has_balcony, has_AC, allows_pets
         :estimated_occupancy_l365d, :availability_365,   # -> occupancy_rate, ratio_occupancy_availability
@@ -36,7 +35,6 @@ const CONFIG = (
     # Configuration for format_labels!(): raw name => name used everywhere after this step
     # (names from the model proposal).
     label_mapping = Dict{Symbol,Symbol}(
-        :neighbourhood_group_cleansed => :location_10_bureaus,
         :host_is_superhost            => :is_superhost,
         :number_of_reviews            => :number_ratings,
         :estimated_revenue_l365d      => :estimated_revenue,
@@ -55,9 +53,9 @@ const CONFIG = (
     # Configuration for convert_currency!(): every amount is converted to base_currency
     currency_rules = (
         columns = [:price, :estimated_revenue],
-        base_currency = "EUR",
+        base_currency = "USD",
         exchange_rates = Dict(                    # value of 1 unit of the currency in EUR
-            "EUR" => 1.0,
+            "USD" => 1.0,
         # add one line per new currency, e.g. "USD" => 0.92
         # rates as of <date>, source: <e.g. ECB reference rate>
         ),
@@ -169,8 +167,9 @@ const CONFIG = (
     ),
 
     cities = Dict(
-        "Barcelona" => (center = (latitude = 41.3851, longitude = 2.1734), currency = "EUR"),
-        "Madrid"    => (center = (latitude = 40.4168, longitude = -3.7038), currency = "EUR"),
+        "Athens"    => (center = (latitude = 37.9838, longitude = 23.7275), currency = "USD"),
+        "Barcelona" => (center = (latitude = 41.3851, longitude = 2.1734), currency = "USD"),
+        "Madrid"    => (center = (latitude = 40.4168, longitude = -3.7038), currency = "USD"),
     ),
 
     # Configuration for split_dataset!(): share of the listings kept back to test the models
@@ -194,7 +193,7 @@ const CONFIG = (
             predictors = [
                 :room_type, :accommodates,                                     # basic facts
                 :ratio_beds_bedrooms, :ratio_accommodates_to_bathrooms,        # basic ratios
-                :location_10_bureaus, :proximity_city_center,                  # location
+                :proximity_city_center,                  # location
                 :has_balcony, :has_AC, :allows_pets,                           # amenities
                 :has_kitchen, :has_pool, :has_tv, :has_kettle, :has_washer,
                 :has_dishwasher, :has_elevator, :has_self_checkin,
@@ -210,7 +209,7 @@ const CONFIG = (
             predictors = [
                 :room_type, :accommodates,
                 :ratio_beds_bedrooms, :ratio_accommodates_to_bathrooms,
-                :location_10_bureaus, :proximity_city_center,
+                :proximity_city_center,
                 :has_balcony, :has_AC, :allows_pets,
                 :has_kitchen, :has_pool, :has_tv, :has_kettle, :has_washer,
                 :has_dishwasher, :has_elevator, :has_self_checkin,
