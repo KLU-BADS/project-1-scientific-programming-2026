@@ -8,6 +8,11 @@
 # The project root is found relative to this file, so paths work regardless of where Julia is started.
 const PROJECT_ROOT = normpath(joinpath(@__DIR__, ".."))
 
+# The city the project runs on. It is a separate constant because a NamedTuple cannot
+# refer to its own fields, so CONFIG.filepath cannot be built from CONFIG.city.
+# Change it here to switch cities: it picks both the data file and the entry in `cities`.
+const CITY = "Athens"
+
 # Configuration for data input, data pre-processing, and the regression model.
 # Based on the variable proposal in the regression model overview.
 #
@@ -16,8 +21,8 @@ const PROJECT_ROOT = normpath(joinpath(@__DIR__, ".."))
 # uses the RAW names from listings.csv.
 const CONFIG = (
     # Filepath for the import fuction for the listings.csv data file located in data/raw
-    filepath = joinpath(PROJECT_ROOT, "data", "raw", lowercase(city) * "_listings.csv"),
-    city = "Athens",                     # key into `cities`, selects the city center for calculate_distance!()
+    filepath = joinpath(PROJECT_ROOT, "data", "raw", lowercase(CITY) * "_listings.csv"),
+    city = CITY,                            # key into `cities`, selects the city center for calculate_distance!()
 
     # Configuration for filter_columns(): raw columns needed to build every variable of the regression model.
     relevant_columns = [
