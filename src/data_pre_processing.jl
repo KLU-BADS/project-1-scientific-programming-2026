@@ -188,7 +188,7 @@ function process_outliers!(df::DataFrame, rules::NamedTuple)
 end
 
 """
-    format_dummies!(df, rules)
+    format_dummies!(df, rule)
 
 Create dummy variables for categorical columns according to the configured rules.
 
@@ -201,8 +201,43 @@ Create dummy variables for categorical columns according to the configured rules
 
 Returns the modified DataFrame in place.
 """
-function format_dummies!(df::DataFrame , rules::NamedTuple)
-
+function format_dummies!(df::DataFrame, rule::NamedTuple)
+        # 1. get text column we search in 
+    texts = df[!,rule.source]
+    # this assigns all rows from the source columns (from dummy rules) from the dataframe to texts
+        # 2. lowercase everything
+    lower_texts = lowercase.(texts)
+    # creates a lowercased version of the texts variable
+        # 3. check if text contains keyword (boolean)
+    found_vector = Bool[]
+    #creates a new list/vector for booleans which will be used to push true/false statements
+    for description in lower_texts
+        found = false 
+        #for loop for each listing, boolean found is used as a tracker to ensure that found statements are only entered into the array once 
+        for word in rule.keywords
+            # for loop for each keyword within the descriptions
+            if occursin(word, description)
+                # if statement that looks if relevant words occur in each listing
+                found = true
+                # the boolean changes to true and ensures that each listing is pushed once per rule
+                # e.g.: if listing uses term washer and free washer, this boolean becomes true after first time, so length for each listing is correct (only once, not 2 because "washer" and "free washer" exists)
+            end
+        end
+        push!(found_vector, found)
+        #this pushes the true or false statements into a list and stores it for later use within the function
+    end 
+        # 4. turn boolean into 1/0 (= true/false) + store this as new column
+    dummy_values = Int.(found_vector)
+        # converts every boolean in found_vector into respective dummy, i.e.: true = 1, false = 0 
+    df[!, rule.target] = dummy_values
+    # all rows in column rule.target in dataframe are set equal to dummy values
+        # 5. delete original columns 
+    if rule.delete == true && rule.source != rule.target
+        select!(df, Not(rule.source))
+        #select = says which columns to keep and Not says which ones to remove, so from df keep everything, but not rule.source
+    end 
+        # 6. return table
+    return df
 end
 
 """
