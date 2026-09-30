@@ -108,12 +108,36 @@ const P = Project1
     end
  
     @testset "format_dummies!" begin
-        # use the real rules: only(filter(r -> r.target == :has_washer, P.CONFIG.dummy_rules))
+        washer_rule = only(filter(r -> r.target == :has_washer, P.CONFIG.dummy_rules))
+        pool_rule = only(filter(r -> r.target == :has_pool, P.CONFIG.dummy_rules))
+        superhost_rule = only(filter(r -> r.target == :is_superhost, P.CONFIG.dummy_rules))
+       
+        df = DataFrame(amenities = ["[\"Washer\", \"Wifi\"]", "[\"Dishwasher\"]"])
+        P.format_dummies!(df, washer_rule)
+        @test df.has_washer == [1, 0]
+
+        df = DataFrame(amenities = ["[\"Pool\"]", "[\"Pool table\"]"])
+        P.format_dummies!(df, pool_rule)
+        @test df.has_pool == [1, 0]
+        @test eltype(df.has_pool) == Int
+
+        df = DataFrame(is_superhost = ["t", "f"])
+        P.format_dummies!(df, superhost_rule)
+        @test df.is_superhost == [1, 0]
+        @test eltype(df.is_superhost) == Int
+        
+        washer_delete_rule = merge(washer_rule, (delete = true,))
+        df = DataFrame(id = [1, 2], amenities = ["[\"Washer\"]", "[\"Wifi\"]"])
+        P.format_dummies!(df, washer_delete_rule)
+        remaining_columns = names(df)
+        @test "amenities" ∉ remaining_columns 
+        @test df.has_washer == [1, 0]
+        @test df.id == [1, 2]
         # - "Washer" -> 1, "Dishwasher" -> 0 for has_washer; "Pool" -> 1, "Pool table" -> 0 for has_pool
         # - the new column holds whole numbers (eltype Int)
         # - is_superhost "t"/"f" becomes 1/0 in the same column
         # - delete = true removes the source column
-        @test_broken false
+        #@test_broken false
     end
  
     @testset "calculate_ratio!" begin
