@@ -141,10 +141,44 @@ const P = Project1
     end
  
     @testset "calculate_ratio!" begin
+        col_col_rule = only(filter(r -> r.target == :ratio_beds_bedrooms, P.CONFIG.ratio_rules))
+        col_fixnum_rule = only(filter(r -> r.target == :occupancy_rate, P.CONFIG.ratio_rules))
+
+        df = DataFrame(beds = [2, 3], bedrooms = [1, 2])
+        P.calculate_ratio!(df, col_col_rule)
+        @test df.ratio_beds_bedrooms == [2.0, 1.5]
+
+        df = DataFrame(estimated_occupancy_l365d = [73, 146])
+        P.calculate_ratio!(df, col_fixnum_rule)
+        @test df.occupancy_rate == [0.2, 0.4]
+        
+
+        del_col_col_rule = merge(col_col_rule, (delete = true,))
+        df = DataFrame(id = [1, 2], beds = [2, 3], bedrooms = [1, 2])
+        P.calculate_ratio!(df, del_col_col_rule)
+        remaining_columns = names(df)
+        @test "beds" ∉ remaining_columns 
+        @test "bedrooms" ∉ remaining_columns 
+        @test df.ratio_beds_bedrooms == [2.0, 1.5]
+        @test df.id == [1, 2]
+
+        del_col_fixnum_rule = merge(col_fixnum_rule, (delete = true,))
+        df = DataFrame(id = [1, 2], estimated_occupancy_l365d = [73, 146])
+        P.calculate_ratio!(df, del_col_fixnum_rule)
+        remaining_columns = names(df)
+        @test "estimated_occupancy_l365d" ∉ remaining_columns  
+        @test df.occupancy_rate == [0.2, 0.4]
+        @test df.id == [1, 2]
+
+        df = DataFrame(beds = [2, 3], bedrooms = [1, missing])
+        @test_throws ErrorException P.calculate_ratio!(df, col_col_rule)
+
+        df = DataFrame(beds = [2, 3], bedrooms = [1, 0])
+        @test_throws ErrorException P.calculate_ratio!(df, col_col_rule)
         # - column / column and column / fixed number (365)
         # - delete = true removes the source columns
         # - a 0 or a missing value in the denominator throws an ErrorException
-        @test_broken false
+        #@test_broken false
     end
  
     @testset "calculate_distance!" begin

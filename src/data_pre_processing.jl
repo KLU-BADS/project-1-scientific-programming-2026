@@ -240,18 +240,52 @@ function format_dummies!(df::DataFrame, rules::NamedTuple)
 end
 
 """
-    calculate_ratio!(df, rule)
+    calculate_ratio!(df, rules)
 
 Compute a ratio feature from two columns using the configured rule.
 
 # Arguments
 - `df::DataFrame`: Input data frame.
-- `rule::NamedTuple`: Rule describing the numerator, denominator, and naming.
+- `rules::NamedTuple`: Rule describing the numerator, denominator, and naming.
 
 Returns the modified DataFrame in place.
 """
-function calculate_ratio!(df::DataFrame, rule::NamedTuple)
+function calculate_ratio!(df::DataFrame, rules::NamedTuple)
+    # 1. get the numerator column
+    numerators = df[!, rules.numerator]
+    # assigns all rows from the numerator columns in the df dataframe to the numerators variable
 
+    # 2. get the denominator: a column OR a fixed number
+    if rules.denominator isa Symbol
+        denominators = df[!, rules.denominator]
+    else
+        denominators = rules.denominator
+    end
+    # determines whether denominator is a column or just a fixed number (e.g.: 365), then assigns that to the denominators variable to ensure division is correct
+
+    # 3. stop with an error if the denominator has a 0 or a missing value
+    if any(ismissing, denominators)
+        error("denominator $(rules.denominator) has a missing value")
+    elseif any(denominator -> denominator == 0, denominators)
+        error("denominator $(rules.denominator) contains a value equal to 0")
+    end
+    # Determines if there are any errors in the denominator columns which would stop the function from working. 
+    # Stops the function and throws the associated error message if the error exists. 
+
+    # 4. divide row by row and store the result as the new column
+    ratios = numerators./denominators 
+    df[!, rules.target] = ratios
+    # Divides numerators by the correct denominators and assigns the ratios variable(so calculated ratios) to the associated new columns in rules.target
+    # 5. delete the source columns if rule.delete is true
+    if rules.delete == true
+        select!(df, Not(rules.numerator))
+        if rules.denominator isa Symbol
+            select!(df, Not(rules.denominator))
+        end
+    end
+    # Deletes old columns according to certain conditions
+        # Deletes numerators if the rules.delete is true
+        # Only deletes rules.denominator columns if the data within the columns are symbols (so refers to a column, say :beds) (and not a fixed number)
 end
 
 """
