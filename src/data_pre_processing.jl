@@ -96,17 +96,27 @@ end
 """
     remove_if_zero!(df, columns)
 
-Drop rows that contain a zero in at least one of the supplied columns. Used to remove listings without bookings 
-and to remove rows with zero bedrooms or beds (denominator of ratio features) .
+Drop rows that contain zero in at least one of the supplied columns.
+Missing values alone do not cause removal. Remaining rows keep their order.
+
+Used to remove listings without bookings and rows with zero denominators
+before calculating ratio features.
 
 # Arguments
-- `df::DataFrame`:              Input data frame.
-- `columns::Vector{Symbol}`:    Columns checked for zero values.
+- `df::DataFrame`: Input data frame.
+- `columns::Vector{Symbol}`: Columns checked for zero values.
 
-Returns the modified DataFrame in place.
+Modify `df` in place and return the same DataFrame.
 """
 function remove_if_zero!(df::DataFrame, columns::Vector{Symbol})
+    keep = trues(nrow(df))
 
+    for col in columns
+        keep .&= .!isequal.(df[!, col], 0)
+    end
+
+    deleteat!(df, findall(.!keep))
+    return df
 end
 
 """
