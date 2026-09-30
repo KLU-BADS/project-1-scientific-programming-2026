@@ -286,8 +286,6 @@ function calculate_ratio!(df::DataFrame, rules::NamedTuple)
     # Deletes old columns according to certain conditions
         # Deletes numerators if the rules.delete is true
         # Only deletes rules.denominator columns if the data within the columns are symbols (so refers to a column, say :beds) (and not a fixed number)
-    # 6. give the table back
-    return df
 end
 
 """
