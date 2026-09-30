@@ -96,26 +96,38 @@ end
 """
     remove_if_zero!(df, columns)
 
-Drop rows that contain zero in at least one of the supplied columns.
-Missing values alone do not cause removal. Remaining rows keep their order.
-
-Used to remove listings without bookings and rows with zero denominators
-before calculating ratio features.
+Drop rows that contain a zero in at least one of the supplied columns. Used to remove listings without bookings 
+and to remove rows with zero bedrooms or beds (denominator of ratio features) .
 
 # Arguments
-- `df::DataFrame`: Input data frame.
-- `columns::Vector{Symbol}`: Columns checked for zero values.
+- `df::DataFrame`:              Input data frame.
+- `columns::Vector{Symbol}`:    Columns checked for zero values.
 
-Modify `df` in place and return the same DataFrame.
+Returns the modified DataFrame in place.
 """
 function remove_if_zero!(df::DataFrame, columns::Vector{Symbol})
-    keep = trues(nrow(df))
+    # 1. create an empty list that will collect the numbers of the rows we want to delete
+    rows_to_delete = Int[]
 
-    for col in columns
-        keep .&= .!isequal.(df[!, col], 0)
+    # 2. go through the table row by row
+    for row in 1:nrow(df)
+        # 3. inside each row, check every column that was given to the function
+        for col in columns
+            value = df[row, col]
+            # 4. a missing value is skipped (the spec says missing values stay),
+            #    a value of 0 means this row has to be deleted
+            if !ismissing(value) && value == 0
+                push!(rows_to_delete, row)
+                # one 0 is enough, so stop checking the other columns of this row
+                break
+            end
+        end
     end
 
-    deleteat!(df, findall(.!keep))
+    # 5. delete all collected rows at once, directly in df (in place, that is what the ! means)
+    deleteat!(df, rows_to_delete)
+
+    # 6. return the same DataFrame so the function can also be used in the pipeline
     return df
 end
 

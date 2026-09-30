@@ -66,7 +66,9 @@ const P = Project1
     end
  
     @testset "remove_duplicates! / remove_if_zero!" begin
-        # Placeholder for remove_duplicates! tests.
+        # - remove_duplicates! keeps the first row of every id
+        # - remove_if_zero! removes rows with 0, leaves missing values alone
+        # - a 0 in any of several listed columns removes the row
         @test_broken false
 
         @testset "remove_if_zero!" begin
