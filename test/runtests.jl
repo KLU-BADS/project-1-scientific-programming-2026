@@ -66,10 +66,35 @@ const P = Project1
     end
  
     @testset "remove_duplicates! / remove_if_zero!" begin
-        # - remove_duplicates! keeps the first row of every id
-        # - remove_if_zero! removes rows with 0, leaves missing values alone
-        # - a 0 in any of several listed columns removes the row
+        # Placeholder for remove_duplicates! tests.
         @test_broken false
+
+        @testset "remove_if_zero!" begin
+            # Remove zero, preserve missing and row order.
+            df = DataFrame(a = [1, 0, 3, missing], b = [5, 6, 7, 8])
+            result = P.remove_if_zero!(df, [:a])
+
+            @test result === df
+            @test nrow(df) == 3
+            @test isequal(df.a, [1, 3, missing])
+            @test df.b == [5, 7, 8]
+
+            # Zero in either column removes the row.
+            df = DataFrame(
+                id = [1, 2, 3, 4, 5],
+                a = [0, 2, missing, missing, 5],
+                b = [4, 0, 0, 8, 9],
+            )
+            P.remove_if_zero!(df, [:a, :b])
+
+            @test df.id == [4, 5]
+
+            # No columns to check means no rows are removed.
+            df = DataFrame(a = [0, 1])
+            P.remove_if_zero!(df, Symbol[])
+
+            @test df.a == [0, 1]
+        end
     end
  
     @testset "parse_bathrooms" begin
