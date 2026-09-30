@@ -96,6 +96,19 @@ const P = Project1
             P.remove_if_zero!(df, Symbol[])
 
             @test df.a == [0, 1]
+
+            # Zero in both columns removes the row only once.
+            df = DataFrame(a = [0, 1], b = [0, 2])
+            P.remove_if_zero!(df, [:a, :b])
+
+            @test nrow(df) == 1
+            @test df.a == [1]
+
+            # Floats: 0.0 and -0.0 count as zero, missing stays.
+            df = DataFrame(a = [0.0, -0.0, 1.5, missing])
+            P.remove_if_zero!(df, [:a])
+
+            @test isequal(df.a, [1.5, missing])
         end
     end
  
