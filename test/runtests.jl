@@ -135,13 +135,45 @@ const P = Project1
     # ------------------------------------------------------------------------------------------
  
     @testset "split_dataset" begin
-        # - 100 rows with 0.2 give 80 training and 20 test rows, no overlap, nothing lost
-        # - both sets keep the original row order, the original DataFrame is unchanged
-        # - 20 (percent) gives the same split as 0.2
+        # standard call with random permutation: create test data set then split into training and test sets with random permutation
+        df = DataFrame(a = 1:100, b = 101:200)
+        df_rand = P.split_dataset(df, 0.2; random_selection = true, seed = 42)
+        # 100 rows with 0.2 give 80 training and 20 test rows, no overlap, nothing lost
+        @test nrow(df_rand[1]) == 0.8 * 100
+        @test nrow(df_rand[2]) == 0.2 * 100
+        @test isempty(intersect(df_rand[1].a, df_rand[2].a))
+        @test length(union(df_rand[1].a, df_rand[2].a)) == 100
+        
+        # original unchanged: original DataFrame df remains unchanged
+        @test df == DataFrame(a = 1:100, b = 101:200)
+
+        # random_selection = false: create test data set, then split into training and test sets without random permutation
+        df_ordered = P.split_dataset(df, 0.2; random_selection = false)
+        # return values are in order
+        @test df_ordered[1].a == 1:80
+        @test df_ordered[1].b == 101:180
+        @test df_ordered[2].a == 81:100
+        @test df_ordered[2].b == 181:200       
+        
         # - the same seed gives the same split, another seed a different one
-        # - random_selection = false takes the last rows as test set
-        # - 0, 1.0, 100, -5, 1000 and a split that leaves a set empty throw an ErrorException
-        @test_broken false
+        df_same_seed = P.split_dataset(df, 0.2; random_selection = true, seed = 42)
+        df_new_seed = P.split_dataset(df, 0.2; random_selection = true, seed = 87)
+        @test df_same_seed == df_rand
+        @test df_same_seed != df_new_seed   
+
+        # percentage split: percentage value returns the same as decimal value
+        df_percent = P.split_dataset(df, 20; random_selection = true, seed = 42)
+        @test df_rand == df_percent
+
+        # error handling: values - 0, 1.0, 100, -5, 1000 and a split that leaves a set empty throw an ErrorException
+        @test_throws ArgumentError P.split_dataset(df, 0; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 1.0; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, -5; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 100; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 1000; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 0.00001; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 0.99999; random_selection = true, seed = 42)
+        #@test_broken false
     end
  
     @testset "regression_city / predict_apartment_performance / evaluate_regression" begin

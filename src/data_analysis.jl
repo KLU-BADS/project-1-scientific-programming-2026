@@ -13,7 +13,28 @@ Returns a DataFrame `df_training` containing the training data and DataFrame `df
 <!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
 function split_dataset(df::DataFrame, test_size::Real; random_selection::Bool = true, seed::Union{Int,Nothing} = nothing)
-    
+    # throw error if test_size is not between 0 and 1 (or in percent, e.g. 20)
+    ((test_size >= 1 ? test_size/100 < 1 : test_size < 1) && test_size/100 > 0) || throw(ArgumentError("test_size has to be between 0 and 1 (or in percent, e.g. 20)"))
+    # throw error if test_size would return empty DataFrame
+    (round(test_size*nrow(df)) == 0 || round((1-test_size)*nrow(df)) == 0) && throw(ArgumentError("test_size too large, training_set is empty"))
+
+    # convert test_size to decimal if it is given in percent
+    test_size >= 1 && (test_size = test_size/100)
+    # if random_selection is true, shuffle the rows of df
+    if random_selection
+        seed !== nothing && Random.seed!(seed)
+        perm = randperm(round(Int, nrow(df)))
+        df_perm = df[perm, : ]
+        # take the last rows of df as test set
+        df_training = first(df_perm, round(Int, (1-test_size)*nrow(df)))
+        df_testing = last(df_perm, round(Int, test_size*nrow(df)))
+    else
+        # take the last rows of df as test set
+        df_training = first(df, round(Int, (1-test_size)*nrow(df)))
+        df_testing= last(df, round(Int, test_size*nrow(df)))
+    end
+    # return the training and testing DataFrames
+    return df_training, df_testing
 end
 
 
