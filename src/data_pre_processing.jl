@@ -233,10 +233,11 @@ function format_dummies!(df::DataFrame, rules::NamedTuple)
     df[!, rules.target] = dummy_values
     # all rows in column rule.target in dataframe are set equal to dummy values
         # 5. delete original columns 
-    if rules.delete == true && rules.source != rule.target
+    if rules.delete == true && rules.source != rules.target
         select!(df, Not(rules.source))
         #select = says which columns to keep and Not says which ones to remove, so from df keep everything, but not rule.source
     end 
+    return df
 end
 
 """
