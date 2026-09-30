@@ -97,7 +97,8 @@ end
     remove_if_zero!(df, columns)
 
 Drop rows that contain a zero in at least one of the supplied columns. Used to remove listings without bookings 
-and to remove rows with zero bedrooms or beds (denominator of ratio features) .
+and to remove rows with a zero in a denominator column of `ratio_rules` (bedrooms, bathrooms, availability_365).
+Rows with missing values are kept, `process_missing!` handles those.
 
 # Arguments
 - `df::DataFrame`:              Input data frame.
@@ -106,43 +107,29 @@ and to remove rows with zero bedrooms or beds (denominator of ratio features) .
 Returns the modified DataFrame in place.
 """
 function remove_if_zero!(df::DataFrame, columns::Vector{Symbol})
-    # 1. make an empty list for the rows we want to delete
+    # 1. find the rows to delete: go through every row and check the given columns
+    #    (e.g. a = [1, 0, 3, missing] gives rows_to_delete = [2])
     rows_to_delete = Int[]
-    # Int[] is an empty list that can only hold whole numbers, like a notepad where we write down row numbers, e.g. [2, 5]
-
-    # 2. go through the table row by row
     for row in 1:nrow(df)
-        # nrow(df) is how many rows the table has, so 1:nrow(df) is 1, 2, 3 ... and row is the number of the row we are looking at now
-
-        # 3. check every column we got for this row
         for col in columns
-            # second loop inside the first one, if columns = [:a, :b] it checks :a first and then :b
             value = df[row, col]
-            # takes the value from this row and this column, like pointing at one cell in excel
-
-            # 4. if the cell is 0 we save the row, missing cells are skipped
+            # missing is checked first because missing == 0 gives missing, not true or false,
+            # so the if would fail; empty cells stay here and process_missing! handles them later
             if !ismissing(value) && value == 0
-                # both parts have to be true, first we check the cell is not missing and only then if it is 0
-                # we check missing first because missing == 0 gives missing and not true or false, so the if would break
-                # also the spec says missing values stay, process_missing! takes care of them later
                 push!(rows_to_delete, row)
-                # push! adds the row number to the end of our list so it gets deleted later
-                break
-                # one 0 is enough to delete the row, so we stop checking the other columns
+                # one 0 is enough to delete the row, so we stop checking its other columns;
                 # without break a row with 0 in two columns would be saved twice
+                break
             end
         end
     end
 
-    # 5. delete all saved rows at once
+    # 2. delete all saved rows at once and in place (the ! means df itself changes);
+    #    deleting inside the loop would shift the row numbers and skip rows
     deleteat!(df, rows_to_delete)
-    # deleteat! removes the rows directly in df (that is what the ! means), no copy is made
-    # we delete at the end and not inside the loop because deleting row 2 would move row 3 up and the loop would skip it
-    # e.g. a = [1, 0, 3, missing] gives rows_to_delete = [2], so 3 rows are left and the missing one stays
 
-    # 6. give back the same table
+    # 3. return the same table so the pipeline can keep working with it
     return df
-    # returns the same df, so it can be used in the pipeline and the tests can check it is the same table
 end
 
 """
