@@ -12,7 +12,23 @@ Select only the columns needed for the subsequent modelling steps.
 Returns a new DataFrame containing only the requested columns.
 """
 function filter_columns(df::DataFrame, relevant_columns::Vector{Symbol})
+    # 1. find the wanted columns that do not exist in the data
+    missing_cols = setdiff(relevant_columns, propertynames(df))
+    # propertynames(df) = all column names of df as Symbols
+    # setdiff(a, b) = everything in a that is not in b
+    # so missing_cols holds the wanted columns that the file does not have (empty if all exist)
 
+    # 2. stop with a clear message if a column is missing
+    isempty(missing_cols) || error("filter_columns: colummns not found in data: $(join(missing_cols, ", "))")
+    # isempty(x) is true if the list has no elements
+    # cond || error(...) = the error only runs if the condition is false, i.e. if something is missing
+    # $(...) puts a value into the text; join(list, ", ") turns the list into "a, b, c"
+    # this check runs before anything is changed, so a failed call leaves df untouched (test 6)
+
+    # 3. keep only the wanted columns and return them as a new table
+    return select(df, relevant_columns)
+    # select (without !) returns a copy, so the original df keeps all its columns (test 3)
+    # the columns come out in the order of relevant_columns
 end
 
 """
