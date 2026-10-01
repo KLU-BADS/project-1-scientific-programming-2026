@@ -77,11 +77,67 @@ const P = Project1
 
     
     @testset "set_types!" begin
+        # 1. normal case: a text column and an integer column become Float64
+        df = DataFrame(id = [1, 2, 3], price = ["\$1,712.00", "\$50.21", missing], beds = [1, 3, missing], name = ["a", "b", "c"])
+        # made-up table: price is text with a dollar sign like in the CSV, beds are integers, both contain a missing value
+        out = P.set_types!(df, Dict(:price => Float64, :beds => Float64))
+        # Dict(column => type) is the rulebook; only price and beds are listed
+        @test isequal(df.price, [1712.0, 50.21, missing])
+        # isequal is needed because missing == missing is not true, isequal treats two missing values as equal
+        @test isequal(df.beds, [1.0, 3.0, missing])
+        # integers become floats and the missing value stays missing
+        @test eltype(df.price) == Union{Missing,Float64}
+        # eltype gives the element type of the column; Union{Missing,Float64} means "Float64 values or missing"
+        @test eltype(df.beds) == Union{Missing,Float64}
+        # the same type for the second column
+        @test out === df
+        # the very same table object is returned, so it was changed in place
 
-        # - set_types! converts every listed column, missing values stay missing,
-        #   and the column type is Union{Missing,Float64}
-        @test_broken false
+        # 2. columns that are not listed stay as they are
+        @test df.id == [1, 2, 3]
+        # id has the same values as before
+        @test eltype(df.id) == Int
+        # and it is still an Int column, not a Float64 one
+        @test df.name == ["a", "b", "c"]
+        # a text column that is not in the Dict is not touched
+
+        # 3. a column without missing values also gets the type Union{Missing,Float64}
+        df2 = DataFrame(a = [1, 2])
+        # a fresh table with a column that has no missing value
+        P.set_types!(df2, Dict(:a => Float64))
+        # convert the only column
+        @test df2.a == [1.0, 2.0]
+        # the values are converted
+        @test eltype(df2.a) == Union{Missing,Float64}
+        # the type is the same as for columns with missing values, so later steps can rely on it
+
+        # 4. edge case: empty Dict
+        df3 = DataFrame(a = [1, 2])
+        # another fresh table
+        P.set_types!(df3, Dict{Symbol,DataType}())
+        # Dict{Symbol,DataType}() is an empty rulebook with the types the function expects
+        @test eltype(df3.a) == Int
+        # nothing was converted
+
+        # 5. error case: a listed column is not in the table
+        df4 = DataFrame(a = [1, 2])
+        # a fresh table with only column a
+        @test_throws ErrorException P.set_types!(df4, Dict(:nonexistent => Float64))
+        # the function must stop with an error
+        @test_throws "nonexistent" P.set_types!(df4, Dict(:nonexistent => Float64))
+        # the message must name the missing column
+
+        # 6. a failed conversion leaves the table untouched
+        df5 = DataFrame(a = ["1", "2"], b = ["x", "y"])
+        # column a can be converted, column b can not ("x" is not a number)
+        @test_throws ArgumentError P.set_types!(df5, Dict(:a => Float64, :b => Float64))
+        # the error comes from convert_value
+        @test df5.a == ["1", "2"]
+        # a was not converted, because all conversions run before anything is written
+        @test df5.b == ["x", "y"]
+        # b is still the original text
     end
+
  
     @testset "filter_columns" begin
         # 1. build a tiny made-up table for the test

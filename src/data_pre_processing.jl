@@ -135,7 +135,19 @@ Convert the selected columns in `df` to the requested Julia types.
 Returns the modified DataFrame in place.
 """
 function set_types!(df::DataFrame, types::Dict{Symbol,DataType})
-
+    # 1. find the requested columns that do not exist in the table
+    missing_cols = setdiff(collect(keys(types)), propertynames(df))
+    # 2. stop with a clear message before anything is changed
+    isempty(missing_cols) || error("set_types!: columns not found in data: $(join(missing_cols, ", "))")
+    # 3. convert every listed column into a new vector first, nothing is written to the table yet
+    converted = Dict(col => Union{Missing,T}[convert_value(v, T) for v in df[!, col]] for (col, T) in types)
+    # 4. only now write the converted columns into the table (so a failed conversion leaves df untouched)
+    for (col, values) in converted
+        # replace the old column with the converted one
+        df[!, col] = values
+    end
+    # 5. return the table
+    return df
 end
 
 """
