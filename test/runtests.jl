@@ -93,10 +93,54 @@ const P = Project1
     
     
     @testset "format_labels!" begin
-        # - only the listed columns are left
-        # - the original DataFrame still has all its columns (filter_columns returns a copy)
-        # - format_labels! renames the columns in the Dict in place and leaves the others alone
-        @test_broken false
+        # 1. normal case: one column gets a new name
+        df = DataFrame(id = [1, 2, 3], host_is_superhost = [true, false, true], price = [100.0, 90.0, 50.0])
+        # tiny made-up table that uses the raw column names
+        out = P.format_labels!(df, Dict(:host_is_superhost => :is_superhost))
+        # Dict(old => new) is the rulebook; out is whatever the function returns
+        @test names(df) == ["id", "is_superhost", "price"]
+        # df itself was renamed (in place), and the order of the columns stayed the same
+        @test df.is_superhost == [true, false, true]
+        # the data under the new name is still the old data
+        @test out === df
+        # === checks that out is the very same table object, not a copy
+
+        # 2. nothing else changed
+        @test df.price == [100.0, 90.0, 50.0]
+        # a column that is not in the mapping keeps its name and its values
+        @test nrow(df) == 3
+        # no rows were lost
+
+        # 3. all three renames from the config at once
+        df2 = DataFrame(id = [1, 2], host_is_superhost = [true, false], number_of_reviews = [10, 20], estimated_revenue_l365d = [500.0, 800.0])
+        # a fresh table with the 3 raw names that CONFIG.label_mapping renames, plus one column (id) that must stay
+        P.format_labels!(df2, Dict(:host_is_superhost => :is_superhost, :number_of_reviews => :number_ratings, :estimated_revenue_l365d => :estimated_revenue))
+        # the same 3 renames as in config.jl, written out so the test does not break if someone edits the config
+        @test names(df2) == ["id", "is_superhost", "number_ratings", "estimated_revenue"]
+        # all three got their new names, id kept its name, and the order of the columns did not change
+        @test df2.number_ratings == [10, 20]
+        # the data under a renamed column is still the old data
+
+        # 4. edge case: empty mapping
+        df3 = DataFrame(a = [1, 2], b = [3, 4])
+        # another fresh table
+        P.format_labels!(df3, Dict{Symbol,Symbol}())
+        # Dict{Symbol,Symbol}() is an empty Dict with the types the function expects
+        @test names(df3) == ["a", "b"]
+        # an empty rulebook renames nothing
+
+        # 5. error case: a name in the mapping is not in the table
+        df4 = DataFrame(a = [1, 2], b = [3, 4])
+        @test_throws ErrorException P.format_labels!(df4, Dict(:nonexistent => :x))
+        # the function must stop with an error
+        @test_throws "nonexistent" P.format_labels!(df4, Dict(:nonexistent => :x))
+        # the message must name the missing column, so the user knows what is wrong
+
+        # 6. a failed call leaves the table untouched
+        @test_throws ErrorException P.format_labels!(df4, Dict(:a => :x, :nonexistent => :y))
+        # one valid rename (a => x) and one invalid key in the same call
+        @test names(df4) == ["a", "b"]
+        # nothing was renamed, not even the valid part, because the check runs before any change
     end
 
     @testset "convert_currency!" begin
