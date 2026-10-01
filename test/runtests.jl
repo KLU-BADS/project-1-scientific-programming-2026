@@ -170,7 +170,34 @@ const P = Project1
     @testset "impute_median_by_room_type!" begin
         # - a missing value gets the median of the same room type, not of all rows
         # - a room type without any known value is left untouched (no error)
-        @test_broken false
+        # 1. a missing value gets the median of its own room type
+        df = DataFrame(room_type = ["Private room", "Private room", "Private room", "Entire home/apt", "Entire home/apt", "Entire home/apt"],
+                       bedrooms = [1.0, 3.0, missing, 4.0, 6.0, missing])
+        # tiny made-up table: each room type has two known values and one missing
+        # the median of all known values would be 3.5, so a wrong answer would be noticed
+        out = P.impute_median_by_room_type!(df, :bedrooms)
+        @test df.bedrooms == [1.0, 3.0, 2.0, 4.0, 6.0, 5.0]
+        # private rooms: median of 1.0 and 3.0 is 2.0, entire homes: median of 4.0 and 6.0 is 5.0
+        # the known values stay as they were
+        @test out === df
+        # === checks that the function returns the very same table, as promised in the docstring
+
+        # 2. a room type without any known value is left untouched (no error)
+        df2 = DataFrame(room_type = ["Private room", "Hotel room", "Private room"], beds = [2.0, missing, missing])
+        P.impute_median_by_room_type!(df2, :beds)
+        # "Hotel room" has no known value, the call must still run without an error
+        @test ismissing(df2.beds[2])
+        # the hotel room stays missing
+        @test df2.beds[3] == 2.0
+        # the private room next to it is still filled with the median of its own type
+
+        # 3. nothing to fill: the table stays as it is
+        df3 = DataFrame(room_type = ["Private room", "Private room"], bedrooms = [1.0, 2.0])
+        P.impute_median_by_room_type!(df3, :bedrooms)
+        @test df3.bedrooms == [1.0, 2.0]
+        # without missing values nothing is changed
+        @test df3.room_type == ["Private room", "Private room"]
+        # the room_type column is never touched
     end
  
     @testset "process_missing!" begin
