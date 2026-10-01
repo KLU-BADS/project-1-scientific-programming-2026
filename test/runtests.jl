@@ -230,7 +230,7 @@ const P = Project1
             fixed = 1:5,
             variable = [1, missing , 22.5, 10000, ℯ - 1]
         )
-        @test_throws ArgumentError P.prepare_predictors(df_error_missing, specs)
+        @test_throws MissingException P.prepare_predictors(df_error_missing, specs)
         df_error_negative = DataFrame(
             fixed = 1:5,
             variable = [1, -2, 22.5, 10000, ℯ - 1]
@@ -239,14 +239,79 @@ const P = Project1
     end
 
     @testset "regression_city / predict_apartment_performance / evaluate_regression" begin
-        # - prices that follow an exact log-linear rule are predicted exactly (rtol = 1e-6),
-        #   evaluate_regression gives r2 ≈ 1 and median_ae ≈ 0
-        # - a model with log_scale = false works and has smearing == 1.0
-        # - a log1p predictor works and the new DataFrame is not changed by the prediction
-        # - errors: a missing value in a used column, a target of 0 with log_scale = true
-        @test_broken false
+        # create test DataFrame and specification
+        df = DataFrame(accommodates = repeat(1:6, 10), reviews = repeat([0.0, 1.0, 5.0, 20.0, 60.0], 12))
+        df.price = exp.(1.0 .+ 0.3 .* df.accommodates)
+        spec = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:accommodates])
+
+        # test if model output following log-linear model are predicted exactly
+        fit = regression_city(df, spec)
+        @test predict_apartment_performance(fit, df) ≈ df.price rtol = 1e-6
+        score = evaluate_regression(fit, df)
+        @test score.n == 60
+        @test score.r2 ≈ 1 atol = 1e-6
+        @test score.r2_model_scale ≈ 1 atol = 1e-6
+        @test score.median_ae ≈ 0 atol = 1e-6
+
+        # a model on the original scale (prices that follow a linear rule) and has smearing
+        linear = DataFrame(accommodates = repeat(1:6, 10))
+        linear.price = 10.0 .+ 5.0 .* linear.accommodates
+        fit = regression_city(linear, merge(spec, (log_scale = false,)))
+        @test predict_apartment_performance(fit, linear) ≈ linear.price rtol = 1e-6
+        @test fit.smearing == 1.0                                       # only log models need the smearing factor
+
+        # a predictor that enters as log(1 + x); the new data is not changed by the prediction
+        df.price = exp.(1.0 .+ 0.3 .* log1p.(df.reviews))
+        spec = (target = :price, log_scale = true, log1p_predictors = [:reviews], predictors = [:reviews])
+        fit = regression_city(df, spec)
+        reviews_before = copy(df.reviews)
+        @test predict_apartment_performance(fit, df) ≈ df.price rtol = 1e-6
+        @test df.reviews == reviews_before
+
+        # missing values (GLM would drop those rows silently) and a target of 0 on the log scale are errors
+        with_missing = DataFrame(x = [1.0, 2.0, missing, 4.0], price = [1.0, 2.0, 3.0, 4.0])
+        @test_throws MissingException regression_city(with_missing, (target = :price, log_scale = false, log1p_predictors = Symbol[], predictors = [:x]))
+        no_log = DataFrame(x = [1.0, 2.0, 3.0], price = [1.0, 0.0, 3.0])
+        @test_throws DomainError regression_city(no_log, (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x]))
     end
  
+     @testset "get_r2" begin
+        
+        # real values vector
+        y1 = [1, 2, 3, 4]
+        y2 = [1, 2, 3]
+
+        # test with expected R-squared of 1
+        y_hat_1 = [1, 2, 3, 4]
+        @test P.get_r2(y1,y_hat_1) == 1
+
+        # test sample with expected R-squared of 0
+        y_hat_0 = [2.5, 2.5, 2.5, 2.5]
+        @test P.get_r2(y1,y_hat_0) == 0
+
+         # test sample with expected R-squared of 0.5       
+        y_hat_0_5 = [1, 2, 4]
+        @test P.get_r2(y2, y_hat_0_5) ≈ 0.5
+
+         # test sample with expected R-squared of -3 
+        y_hat_minus_3 = [3, 2, 1]
+        @test P.get_r2(y2, y_hat_minus_3) ≈ -3
+
+        # test sample with expected R-squared of ≈ 1 - 9/42
+        y_hat_swapped = [1, 2, 3]
+                @test P.get_r2(y_hat_0_5, y2) ≈ 1 - 9/42
+
+        # test if function throws error for verctors with different lengths
+        @test_throws DimensionMismatch P.get_r2(y1,y2)
+        # test if function throws error for same values
+        @test_throws ArgumentError P.get_r2([5, 5, 5], [4, 5, 6]) 
+        # test if function throws error for empty y
+        @test_throws ArgumentError P.get_r2([],[]) 
+        # test if function throws error for missing values
+        y_hat = [4, missing, 2, 1]
+        @test_throws MissingException P.get_r2(y1,y_hat) 
+     end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------
