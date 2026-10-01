@@ -43,7 +43,29 @@ Rename columns in `df` according to a provided name mapping.
 Returns the modified DataFrame in place.
 """
 function format_labels!(df::DataFrame, mapping::Dict{Symbol,Symbol})
+    # 1. find the old names in the mapping that do not exist in the table
+    missing_cols = setdiff(collect(keys(mapping)), propertynames(df))
+    # keys(mapping) = the old names (the left side of each =>)
+    # collect(...) turns them into a normal list (Vector)
+    # propertynames(df) = all column names of df as Symbols
+    # setdiff(a, b) = everything in a that is not in b, so missing_cols holds the old names the data does not have
 
+    # 2. stop with a clear message if an old name is missing
+    isempty(missing_cols) || error("format_labels!: columns not found in data: $(join(missing_cols, ", "))")
+    # isempty(x) is true if the list has no elements
+    # cond || error(...) = the error only runs if the condition is false, i.e. if something is missing
+    # $(...) puts a value into the text; join(list, ", ") turns the list into "a, b, c"
+    # this check runs before anything is renamed, so a failed call leaves df untouched (test 6)
+
+    # 3. rename the columns in place
+    rename!(df, mapping)
+    # rename! (with !) changes df itself instead of making a copy (tests 1 and 3)
+    # given a Dict(old => new), it renames exactly those columns and leaves the others alone (test 2)
+    # with an empty Dict nothing happens (test 4)
+
+    # 4. return the table
+    return df
+    # the docstring promises "the modified DataFrame", and the test checks out === df
 end
 
 """
