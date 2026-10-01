@@ -47,7 +47,52 @@ const P = Project1
         @test_broken false
     end
  
-    @testset "filter_columns / format_labels!" begin
+    @testset "filter_columns" begin
+        # 1. build a tiny made-up table for the test
+        df = DataFrame(id = [1, 2, 3], price = [100.0, 90.0, 50.0], junk = ["a", "b", "c"])
+        # DataFrame(name = values, ...) builds a table by hand: 3 rows, 3 columns
+        # "junk" stands for a column we do NOT want to keep
+
+        # 2. normal case: only the listed columns are left, the values are unchanged
+        out = P.filter_columns(df,[:id, :price])
+        # runs our function; P. is needed because the tests reach the package functions through P = Project1
+        # [:id, :price] is the list of columns to keep, written as Symbols like in CONFIG.relevant_columns
+        @test names(out) == ["id", "price"]
+        # names(out) gives the column names as Strings, so we compare with Strings, not Symbols
+        # this checks that "junk" is gone and that only the two wanted columns are left, in this order
+        @test out.price == [100.0, 90.0, 50.0]
+        # out.price is the price column of the result; the values must be exactly the same as before
+        @test nrow(out) == 3
+        # nrow = number of rows; filtering columns must never remove or add rows        
+
+        # 3. nothing else changed: the original keeps all its columns and is not linked to the copy
+        @test names(df) == ["id", "price", "junk"]
+        # the original table must still have all 3 columns, because filter_columns returns a copy
+        out[1, :price] = 999.0
+        # changes the price in row 1 of the RESULT to 999.0 (out[row, column] = new value)
+        @test df.price[1] == 100.0
+        # the original still has 100.0, so result and original are separate tables
+        # changing the result must not change the original, otherwise it would not be a real copy
+
+        # 4. edge case: a single column
+        @test names(P.filter_columns(df, [:id])) == ["id"]
+        # the smallest useful list has only one column; the function must still return a table with just that column
+
+        # 5. error case: a wanted column that does not exist stops with an error that names it
+        @test_throws ErrorException P.filter_columns(df, [:id, :nonexistent])
+        # passes only if the call stops with an error(...); :nonexistent is not in df, so it must fail
+        @test_throws "nonexistent" P.filter_columns(df, [:id, :nonexistent])
+        # a String as the first argument of @test_throws checks that the error message contains that word
+        # so the message must name the missing column and not just say "error"
+
+        # 6. a failed call leaves the table untouched
+        @test names(df) == ["id", "price", "junk"]
+        # after the two failed calls above, df must still be exactly as before
+        # this works because the check runs before select in the function
+    end 
+    
+    
+    @testset "format_labels!" begin
         # - only the listed columns are left
         # - the original DataFrame still has all its columns (filter_columns returns a copy)
         # - format_labels! renames the columns in the Dict in place and leaves the others alone
