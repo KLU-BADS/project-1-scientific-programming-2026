@@ -3,7 +3,7 @@ using GLM, DataFrames, Statistics, Random
 """
     split_dataset(df, test_size; random_selection = true, seed = nothing) -> (df_training, df_test)
 
-Split `df` into a training and a test set. `df` itself is not changed and both sets keep the original order of the rows.
+Split `df` into a training and a test set. `df` itself is not changed.
 
 - `test_size`:          share of the rows in the test set, as decimal (`0.2`) or in percent (`20`); values above 1 are percent.
 - `random_selection`:   `true` draws the test rows at random (`seed` makes the draw reproducible), `false` uses the last rows.
@@ -13,25 +13,30 @@ Returns a DataFrame `df_training` containing the training data and DataFrame `df
 <!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
 function split_dataset(df::DataFrame, test_size::Real; random_selection::Bool = true, seed::Union{Int,Nothing} = nothing)
+    
+    # convert test_size to decimal if it is given in percent (threshhold = 1)
+    test_size > 1 && (test_size = test_size/100)
+
     # throw error if test_size is not between 0 and 1 (or in percent, e.g. 20)
     ((test_size >= 1 ? test_size/100 < 1 : test_size < 1) && test_size/100 > 0) || throw(ArgumentError("test_size has to be between 0 and 1 (or in percent, e.g. 20)"))
     # throw error if test_size would return empty DataFrame
     (round(test_size*nrow(df)) == 0 || round((1-test_size)*nrow(df)) == 0) && throw(ArgumentError("test_size too large, training_set is empty"))
 
-    # convert test_size to decimal if it is given in percent
-    test_size >= 1 && (test_size = test_size/100)
+    # set absolut test size value
+    test_size_absolut = round(Int, test_size*nrow(df))
+    
     # if random_selection is true, shuffle the rows of df
     if random_selection
         seed !== nothing && Random.seed!(seed)
         perm = randperm(round(Int, nrow(df)))
         df_perm = df[perm, : ]
         # take the last rows of df as test set
-        df_training = first(df_perm, round(Int, (1-test_size)*nrow(df)))
-        df_testing = last(df_perm, round(Int, test_size*nrow(df)))
+        df_training = first(df_perm, nrow(df) - test_size_absolut)
+        df_testing = last(df_perm, test_size_absolut)
     else
         # take the last rows of df as test set
-        df_training = first(df, round(Int, (1-test_size)*nrow(df)))
-        df_testing= last(df, round(Int, test_size*nrow(df)))
+        df_training = first(df, nrow(df) - test_size_absolut)
+        df_testing= last(df, test_size_absolut)
     end
     # return the training and testing DataFrames
     return df_training, df_testing
@@ -53,7 +58,6 @@ Returns a transformed DataFrame with the requested predictors adjusted for log-s
 function prepare_predictors(df::DataFrame, spec::NamedTuple)
 
 end
-
 
 """
     regression_city(df_training, spec) -> (spec, model, smearing)

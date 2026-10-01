@@ -173,9 +173,73 @@ const P = Project1
         @test_throws ArgumentError P.split_dataset(df, 1000; random_selection = true, seed = 42)
         @test_throws ArgumentError P.split_dataset(df, 0.00001; random_selection = true, seed = 42)
         @test_throws ArgumentError P.split_dataset(df, 0.99999; random_selection = true, seed = 42)
-        #@test_broken false
     end
  
+    @testset "prepare_predictors" begin
+        # create the data frame
+        df = DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+
+        # create specs
+        specs = (log1p_predictors = Symbol[:variable],)
+
+        # call function with test data
+        df_log1p = P.prepare_predictors(df, specs)
+
+        # correct values?
+        @test df_log1p.variable ≈ [log1p(1),log1p(0),log1p(22.5),log1p(10000),log1p(ℯ - 1)]
+        
+        # non-specified columns unchanged?
+        @test df_log1p.fixed ≈ 1:5
+        
+        # input DataFrame remains unchanged?
+        @test df == DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+
+        # input consistent: same output for input with the same values
+        df_2 = DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+        @test isequal(P.prepare_predictors(df, specs), P.prepare_predictors(df_2, specs))
+
+        # column names unchanged?
+        @test names(df_log1p) == names(df)
+
+        # dimensions indetical?
+        @test nrow(df_log1p) == nrow(df)
+        @test ncol(df_log1p) == ncol(df)
+
+        # returns copy?
+        @test P.prepare_predictors(df, specs) !== df
+
+        # no columns in specs: returns a copy of the same data frame
+        specs_no_reference = (log1p_predictors = Symbol[],)
+        @test P.prepare_predictors(df, specs_no_reference) isa DataFrame
+        @test P.prepare_predictors(df, specs_no_reference) == DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+
+        # error handling: missing values, negative values should throw error
+        df_error_missing = DataFrame(
+            fixed = 1:5,
+            variable = [1, missing , 22.5, 10000, ℯ - 1]
+        )
+        @test_throws ArgumentError P.prepare_predictors(df_error_missing, specs)
+        df_error_negative = DataFrame(
+            fixed = 1:5,
+            variable = [1, -2, 22.5, 10000, ℯ - 1]
+        )
+        @test_throws DomainError P.prepare_predictors(df_error_negative, specs)
+
+        #@test_broken false
+    end
+
     @testset "regression_city / predict_apartment_performance / evaluate_regression" begin
         # - prices that follow an exact log-linear rule are predicted exactly (rtol = 1e-6),
         #   evaluate_regression gives r2 ≈ 1 and median_ae ≈ 0
