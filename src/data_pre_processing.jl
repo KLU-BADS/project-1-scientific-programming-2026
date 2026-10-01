@@ -174,7 +174,37 @@ Replace missing values in a column with the median value for the same room type.
 Returns the modified DataFrame in place.
 """
 function impute_median_by_room_type!(df::DataFrame, col::Symbol)
+    # 1. go through every room type that occurs in the table (e.g. "Private room", "Entire home/apt")
+    for room_type in unique(df.room_type)
+        # unique(list) = the list without repeated values, so every room type is handled once
 
+        # 2. collect the known values of this room type
+        known = Float64[]
+        # an empty list that will hold the values of col that are not missing
+        for row in 1:nrow(df)
+            # isequal is used instead of == so that the check also works if a room type itself were missing
+            if isequal(df[row, :room_type], room_type) && !ismissing(df[row, col])
+                push!(known, df[row, col])
+                # push!(list, x) adds x at the end of the list
+            end
+        end
+
+        # 3. fill the empty cells, but only if there is at least one known value
+        if !isempty(known)
+            middle = median(known)
+            # median(list) = the middle value of the list (Statistics is already loaded in this file)
+            for row in 1:nrow(df)
+                if isequal(df[row, :room_type], room_type) && ismissing(df[row, col])
+                    df[row, col] = middle
+                    # writes the median into this one empty cell, df itself changes (the ! in the name)
+                end
+            end
+        end
+        # with no known value the cells stay missing and nothing breaks (the second line of the spec)
+    end
+
+    # 4. return the same table so the pipeline can keep working with it
+    return df
 end
 
 """
