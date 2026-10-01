@@ -164,7 +164,27 @@ const P = Project1
     @testset "parse_bathrooms" begin
         # - "1 bath" -> 1.0, "1.5 shared baths" -> 1.5, "0 baths" -> 0.0, "Half-bath" -> 0.5
         # - "Bathroom" (no number) and missing -> missing
-        @test_broken false
+        # 1. the four texts from the spec
+        @test P.parse_bathrooms("1 bath") == 1.0
+        # P. is needed because the tests reach the package functions through P = Project1
+        @test P.parse_bathrooms("1.5 shared baths") == 1.5
+        @test P.parse_bathrooms("0 baths") == 0.0
+        # zero is a real number, so the answer is 0.0 and not missing (remove_if_zero! deals with it later)
+        @test P.parse_bathrooms("Half-bath") == 0.5
+        # "half" has no number in the text, so the function returns 0.5
+
+        # 2. text without a number and a missing value both give missing
+        @test ismissing(P.parse_bathrooms("Bathroom"))
+        # ismissing is used because missing == missing gives missing, not true, so @test could not judge it
+        @test ismissing(P.parse_bathrooms(missing))
+
+        # 3. the remaining branches: empty text, half with a prefix, capital letters
+        @test ismissing(P.parse_bathrooms(""))
+        # an empty text has no words, so the isempty(words) line returns missing
+        @test P.parse_bathrooms("Shared half-bath") == 0.5
+        # Airbnb writes it like this too, occursin finds "half" anywhere in the text
+        @test P.parse_bathrooms("2 Baths") == 2.0
+        # the capital B must not matter, because the text is lowercased first
     end
  
     @testset "impute_median_by_room_type!" begin
