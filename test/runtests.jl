@@ -236,8 +236,6 @@ const P = Project1
             variable = [1, -2, 22.5, 10000, ℯ - 1]
         )
         @test_throws DomainError P.prepare_predictors(df_error_negative, specs)
-
-        #@test_broken false
     end
 
     @testset "regression_city / predict_apartment_performance / evaluate_regression" begin

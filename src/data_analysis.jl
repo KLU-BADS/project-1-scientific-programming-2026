@@ -56,7 +56,16 @@ The selected columns are transformed using `log(1 + x)` before the model fit.
 Returns a transformed DataFrame with the requested predictors adjusted for log-scaling.
 """
 function prepare_predictors(df::DataFrame, spec::NamedTuple)
+     # return DataFrame without transformations if log1p_predictors is empty
+    isempty(spec.log1p_predictors) && return copy(df)
+    # check for values <-1 and missing values and throw an error
+    for check_col in spec.log1p_predictors
+        any(ismissing, df[! , check_col]) && throw(ArgumentError("Missing value(s) in specified column!"))
+        any(x -> x <= -1, df[! , check_col]) && throw(DomainError("Specified vector includes negative value(s) <-1!"))
+    end
 
+    # return transformed DataFrame
+    return transform(df, spec.log1p_predictors .=> ByRow(log1p); renamecols = false)
 end
 
 """
@@ -69,7 +78,7 @@ Fit one linear model. `spec` is one entry of `CONFIG.regression_models` with the
 Throws an error if a used column has missing values or, on the log scale, if the target has values of 0 or below.
 """
 function regression_city(df_training::DataFrame, spec::NamedTuple)
-    
+
 end
 
 
