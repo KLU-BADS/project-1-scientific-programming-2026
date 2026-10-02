@@ -157,7 +157,8 @@ end
     remove_if_zero!(df, columns)
 
 Drop rows that contain a zero in at least one of the supplied columns. Used to remove listings without bookings 
-and to remove rows with zero bedrooms or beds (denominator of ratio features) .
+and to remove rows with a zero in a denominator column of `ratio_rules` (bedrooms, bathrooms, availability_365).
+Rows with missing values are kept, `process_missing!` handles those.
 
 # Arguments
 - `df::DataFrame`:              Input data frame.
@@ -166,7 +167,29 @@ and to remove rows with zero bedrooms or beds (denominator of ratio features) .
 Returns the modified DataFrame in place.
 """
 function remove_if_zero!(df::DataFrame, columns::Vector{Symbol})
+    # 1. find the rows to delete: go through every row and check the given columns
+    #    (e.g. a = [1, 0, 3, missing] gives rows_to_delete = [2])
+    rows_to_delete = Int[]
+    for row in 1:nrow(df)
+        for col in columns
+            value = df[row, col]
+            # missing is checked first because missing == 0 gives missing, not true or false,
+            # so the if would fail; empty cells stay here and process_missing! handles them later
+            if !ismissing(value) && value == 0
+                push!(rows_to_delete, row)
+                # one 0 is enough to delete the row, so we stop checking its other columns;
+                # without break a row with 0 in two columns would be saved twice
+                break
+            end
+        end
+    end
 
+    # 2. delete all saved rows at once and in place (the ! means df itself changes);
+    #    deleting inside the loop would shift the row numbers and skip rows
+    deleteat!(df, rows_to_delete)
+
+    # 3. return the same table so the pipeline can keep working with it
+    return df
 end
 
 """
