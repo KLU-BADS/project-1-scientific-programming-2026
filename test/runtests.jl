@@ -38,10 +38,46 @@ const P = Project1
     # data_pre_processing.jl
     # ------------------------------------------------------------------------------------------
  
-    @testset "convert_value / set_types!" begin
-        # - "\$1,250.00" becomes 1250.0 (currency sign and thousands separator are removed)
-        # - an Int becomes a Float64, missing stays missing
-        # - text that is not a number ("abc") throws an ArgumentError
+    @testset "convert_value" begin
+        # 1. text with currency sign and thousands separator
+        @test P.convert_value("\$1,250.00", Float64) == 1250.0
+        # "\$" is a dollar sign inside a string (a plain $ would start an interpolation)
+        # the $ and the comma are removed, then the rest is parsed as a Float64
+        @test P.convert_value("\$50.21", Float64) == 50.21
+        # a price without a thousands separator works the same way
+
+        # 2. plain number text (like beds or bathrooms in the CSV)
+        @test P.convert_value("3", Float64) == 3.0
+        # whole number as text becomes 3.0
+        @test P.convert_value("1.5", Float64) == 1.5
+        # decimal number as text
+
+        # 3. values that are already numbers
+        @test P.convert_value(3, Float64) == 3.0
+        # an Int becomes a Float64
+        @test P.convert_value(3, Float64) isa Float64
+        # isa checks the type, so we know it is really a Float64 and not an Int that equals 3.0
+        @test P.convert_value(2.5, Float64) == 2.5
+        # a Float64 stays as it is
+
+        # 4. missing values stay missing
+        @test ismissing(P.convert_value(missing, Float64))
+        # ismissing is needed here because missing == missing is not true, it is missing
+
+        # 5. empty text counts as missing
+        @test ismissing(P.convert_value("", Float64))
+        # an empty cell is a missing value, not a broken number
+
+        # 6. error case: text that is not a number
+        @test_throws ArgumentError P.convert_value("abc", Float64)
+        # the function must stop with an ArgumentError
+        @test_throws "abc" P.convert_value("abc", Float64)
+        # the message must contain the bad value, so the user knows what could not be parsed
+    end
+
+    
+    @testset "set_types!" begin
+
         # - set_types! converts every listed column, missing values stay missing,
         #   and the column type is Union{Missing,Float64}
         @test_broken false

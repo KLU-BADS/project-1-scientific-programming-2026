@@ -81,7 +81,29 @@ Convert a single value to type `T` while preserving missing values. Used by set_
 Returns the converted value. Missing values remain missing.
 """
 function convert_value(value, T::Type)
+    # 1. missing stays missing
+    ismissing(value) && return missing
+    # ismissing(value) is true if the value is missing
+    # cond && return x = if the condition is true, the function ends here and gives back x
+    # so a missing value is returned unchanged (test 4)
 
+    # 2. text: clean it and parse it
+    if value isa AbstractString
+        # isa checks the type; AbstractString covers String and the special string types CSV.jl uses
+        cleaned = replace(strip(value), "\$" => "", "," => "")
+        # strip removes spaces at the start and the end
+        # replace(text, old => new, ...) swaps every old part for the new one; "\$" is a dollar sign, and "" means "nothing"
+        # so "\$1,250.00" becomes "1250.00" (tests 1 and 2)
+        isempty(cleaned) && return missing
+        # an empty cell has nothing to parse, so it counts as missing (test 5)
+        return parse(T, cleaned)
+        # parse(Float64, "1250.00") turns the text into the number 1250.0 (tests 1 and 2)
+        # parse throws an ArgumentError with the bad text in the message if it is not a number (test 6)
+    end
+
+    # 3. everything else (numbers): convert to the target type
+    return convert(T, value)
+    # convert(Float64, 3) gives 3.0 and convert(Float64, 2.5) stays 2.5 (test 3)
 end
 
 """
