@@ -434,15 +434,109 @@ const P = Project1
     # ------------------------------------------------------------------------------------------
  
     @testset "split_dataset" begin
-        # - 100 rows with 0.2 give 80 training and 20 test rows, no overlap, nothing lost
-        # - both sets keep the original row order, the original DataFrame is unchanged
-        # - 20 (percent) gives the same split as 0.2
+        # standard call with random permutation: create test data set then split into training and test sets with random permutation
+        df = DataFrame(a = 1:100, b = 101:200)
+        df_rand = P.split_dataset(df, 0.2; random_selection = true, seed = 42)
+        # 100 rows with 0.2 give 80 training and 20 test rows, no overlap, nothing lost
+        @test nrow(df_rand[1]) == 0.8 * 100
+        @test nrow(df_rand[2]) == 0.2 * 100
+        @test isempty(intersect(df_rand[1].a, df_rand[2].a))
+        @test length(union(df_rand[1].a, df_rand[2].a)) == 100
+        
+        # original unchanged: original DataFrame df remains unchanged
+        @test df == DataFrame(a = 1:100, b = 101:200)
+
+        # random_selection = false: create test data set, then split into training and test sets without random permutation
+        df_ordered = P.split_dataset(df, 0.2; random_selection = false)
+        # return values are in order
+        @test df_ordered[1].a == 1:80
+        @test df_ordered[1].b == 101:180
+        @test df_ordered[2].a == 81:100
+        @test df_ordered[2].b == 181:200       
+        
         # - the same seed gives the same split, another seed a different one
-        # - random_selection = false takes the last rows as test set
-        # - 0, 1.0, 100, -5, 1000 and a split that leaves a set empty throw an ErrorException
-        @test_broken false
+        df_same_seed = P.split_dataset(df, 0.2; random_selection = true, seed = 42)
+        df_new_seed = P.split_dataset(df, 0.2; random_selection = true, seed = 87)
+        @test df_same_seed == df_rand
+        @test df_same_seed != df_new_seed   
+
+        # percentage split: percentage value returns the same as decimal value
+        df_percent = P.split_dataset(df, 20; random_selection = true, seed = 42)
+        @test df_rand == df_percent
+
+        # error handling: values - 0, 1.0, 100, -5, 1000 and a split that leaves a set empty throw an ErrorException
+        @test_throws ArgumentError P.split_dataset(df, 0; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 1.0; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, -5; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 100; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 1000; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 0.00001; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 0.99999; random_selection = true, seed = 42)
     end
  
+    @testset "prepare_predictors" begin
+        # create the data frame
+        df = DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+
+        # create specs
+        specs = (log1p_predictors = Symbol[:variable],)
+
+        # call function with test data
+        df_log1p = P.prepare_predictors(df, specs)
+
+        # correct values?
+        @test df_log1p.variable ≈ [log1p(1),log1p(0),log1p(22.5),log1p(10000),log1p(ℯ - 1)]
+        
+        # non-specified columns unchanged?
+        @test df_log1p.fixed ≈ 1:5
+        
+        # input DataFrame remains unchanged?
+        @test df == DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+
+        # input consistent: same output for input with the same values
+        df_2 = DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+        @test isequal(P.prepare_predictors(df, specs), P.prepare_predictors(df_2, specs))
+
+        # column names unchanged?
+        @test names(df_log1p) == names(df)
+
+        # dimensions indetical?
+        @test nrow(df_log1p) == nrow(df)
+        @test ncol(df_log1p) == ncol(df)
+
+        # returns copy?
+        @test P.prepare_predictors(df, specs) !== df
+
+        # no columns in specs: returns a copy of the same data frame
+        specs_no_reference = (log1p_predictors = Symbol[],)
+        @test P.prepare_predictors(df, specs_no_reference) isa DataFrame
+        @test P.prepare_predictors(df, specs_no_reference) == DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+
+        # error handling: missing values, negative values should throw error
+        df_error_missing = DataFrame(
+            fixed = 1:5,
+            variable = [1, missing , 22.5, 10000, ℯ - 1]
+        )
+        @test_throws ArgumentError P.prepare_predictors(df_error_missing, specs)
+        df_error_negative = DataFrame(
+            fixed = 1:5,
+            variable = [1, -2, 22.5, 10000, ℯ - 1]
+        )
+        @test_throws DomainError P.prepare_predictors(df_error_negative, specs)
+    end
+
     @testset "regression_city / predict_apartment_performance / evaluate_regression" begin
         # - prices that follow an exact log-linear rule are predicted exactly (rtol = 1e-6),
         #   evaluate_regression gives r2 ≈ 1 and median_ae ≈ 0
