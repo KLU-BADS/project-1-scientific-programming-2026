@@ -236,7 +236,32 @@ Parse a bathroom description such as `"1.5 shared baths"` or `"Half-bath"`. Used
 Returns the numeric bathroom count, or `missing` if it cannot be parsed.
 """
 function parse_bathrooms(text)
+    # 1. a missing text cannot be read, so the answer is missing too
+    ismissing(text) && return missing
+    # cond && return x = return x only if the condition is true, otherwise go on to the next line
 
+    # 2. make everything lowercase so "Half-bath" and "half-bath" are treated the same
+    lower_text = lowercase(text)
+
+    # 3. a half bath has no number in the text, so it is handled first
+    if occursin("half", lower_text)
+        return 0.5
+    end
+    # occursin(a, b) = true if the word a is somewhere inside the text b
+
+    # 4. split the text into words and stop if there are none (e.g. an empty text "")
+    words = split(lower_text)
+    # split("1.5 shared baths") = ["1.5", "shared", "baths"], split cuts at the spaces
+    isempty(words) && return missing
+
+    # 5. the number is the first word, try to turn it into a number
+    number = tryparse(Float64, words[1])
+    # tryparse gives the number if the word is one ("1.5" gives 1.5), and nothing if it is not ("bathroom")
+    # parse would stop with an error for "bathroom", tryparse lets us decide what to do
+
+    # 6. no number found means missing, otherwise give back the number
+    isnothing(number) && return missing
+    return number
 end
 
 """
