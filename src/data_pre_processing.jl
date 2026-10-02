@@ -267,7 +267,8 @@ end
 """
     impute_median_by_room_type!(df, col)
 
-Replace missing values in a column with the median value for the same room type.
+Replace missing values in a column with the median value for the same room type. A room type without any
+known value is left untouched, its missing values stay missing.
 
 # Arguments
 - `df::DataFrame`:  Input data frame.
@@ -276,7 +277,43 @@ Replace missing values in a column with the median value for the same room type.
 Returns the modified DataFrame in place.
 """
 function impute_median_by_room_type!(df::DataFrame, col::Symbol)
+    # 1. go through every room type that occurs in the table (e.g. "Private room", "Entire home/apt")
+    for room_type in unique(df.room_type)
+        # unique(list) = the list without repeated values, so every room type is handled once
+        # df.room_type is the room_type column, its name is fixed in the data
 
+        # 2. collect the known values of this room type
+        known = Float64[]
+        # an empty list that will hold the values of col that are not missing
+        for row in 1:nrow(df)
+            # 1:nrow(df) goes through every row number of the table
+            # isequal is used instead of == so that the check also works if a room type itself were missing
+            if isequal(df[row, :room_type], room_type) && !ismissing(df[row, col])
+                # && = both must be true: the row has this room type and its value is known
+                push!(known, df[row, col])
+                # push!(list, x) adds x at the end of the list
+            end
+        end
+
+        # 3. fill the empty cells, but only if there is at least one known value
+        if !isempty(known)
+            # !isempty(known) = the list has at least one value, the median of an empty list would fail
+            middle = median(known)
+            # median(list) = the middle value of the list (Statistics is already loaded in this file)
+            # the median is used instead of the mean, so one very big flat does not pull the value up
+            for row in 1:nrow(df)
+                if isequal(df[row, :room_type], room_type) && ismissing(df[row, col])
+                    df[row, col] = middle
+                    # writes the median into this one empty cell, df itself changes (the ! in the name)
+                end
+            end
+        end
+        # with no known value the cells stay missing and nothing breaks (the second line of the spec)
+    end
+
+    # 4. return the same table so the pipeline can keep working with it
+    return df
+    # the docstring promises the modified DataFrame
 end
 
 """
