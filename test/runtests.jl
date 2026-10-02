@@ -181,6 +181,8 @@ const P = Project1
         # the known values stay as they were
         @test out === df
         # === checks that the function returns the very same table, as promised in the docstring
+        @test df.room_type == ["Private room", "Private room", "Private room", "Entire home/apt", "Entire home/apt", "Entire home/apt"]
+        # the room_type column is not changed, only the empty bedrooms cells are filled
 
         # 2. a room type without any known value is left untouched (no error)
         df2 = DataFrame(room_type = ["Private room", "Hotel room", "Private room"], beds = [2.0, missing, missing])
