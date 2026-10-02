@@ -477,6 +477,35 @@ Compute a distance feature relative to the configured city center.
 
 Returns the modified DataFrame in place.
 """
-function calculate_distance!(df::DataFrame, rules::NamedTuple, center::NamedTuple)
+function calculate_distance!(df::DataFrame, rule::NamedTuple, center::NamedTuple)
+# 1. get the latitude and longitude columns of the listings
+    lats = df[!, rule.source_columns.latitude]
+    lons = df[!, rule.source_columns.longitude]
+    # Assigns all rows in the column rule.source_columns.latitude/longitude from the df datafram to their respective variables 
+    # 2. convert all coordinates from degrees to radians
+    lats_rad = deg2rad.(lats)
+    longs_rad = deg2rad.(lons)
+    center_lat_rad = deg2rad(center.latitude)
+    center_lon_rad = deg2rad(center.longitude)
+    # Converts the coordinates of the individual listing locations and city center into radians (i.e.: sin, cos)
 
+    # 3. apply the haversine formula to get the distance in km
+    dlat = lats_rad .- center_lat_rad 
+    dlon = longs_rad .- center_lon_rad
+    a_part_lat = sin.(dlat./2).^2 
+    a_part_lon = cos.(lats_rad).*cos.(center_lat_rad).*sin.(dlon./2).^2
+    a = a_part_lat.+a_part_lon
+    c = 2 .*asin.(sqrt.(a))
+    earth_radius_km = 6371.0
+    distances = earth_radius_km .* c
+
+    # 4. store the distances as the new column
+    df[!, rule.target] = distances
+
+    # 5. delete the latitude and longitude columns if rule.delete is true
+    if rule.delete == true  
+        select!(df, Not(rule.source_columns.latitude))
+        select!(df, Not(rule.source_columns.longitude))
+    end
+    return df
 end
