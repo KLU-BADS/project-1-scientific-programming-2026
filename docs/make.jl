@@ -5,6 +5,7 @@ using Project1
 # Doctests run in a bare module, so the package has to be brought into scope
 # for them. Without this, every jldoctest fails with UndefVarError.
 DocMeta.setdocmeta!(Project1, :DocTestSetup, :(using Project1); recursive = true)
+DocMeta.setdocmeta!(Project1, :DocTestSetup, :(using Project1, DataFrames); recursive = true)
 
 makedocs(
     sitename = "Project1.jl",
