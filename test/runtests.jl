@@ -182,10 +182,33 @@ const P = Project1
     end
  
     @testset "calculate_distance!" begin
+        # 1: Get inputs
+        dist_rule = P.CONFIG.distance_rule 
+        cent_coordinates = P.CONFIG.cities[P.CONFIG.city].center 
+
+        # 2: Distance to center is 0 test 
+        df = DataFrame(latitude = [cent_coordinates.latitude], longitude = [cent_coordinates.longitude])
+        P.calculate_distance!(df, dist_rule, cent_coordinates)
+        @test df.proximity_city_center ≈ [0.0] atol = 0.05
+
+        # 3: Distance to center is 1 degree north test 
+        df = DataFrame(latitude = [cent_coordinates.latitude + 1], longitude = [cent_coordinates.longitude])
+        P.calculate_distance!(df, dist_rule, cent_coordinates)
+        @test df.proximity_city_center ≈ [111.19] atol = 0.05
+
+        # 4: Testing if delete removes latitude and longitude 
+        df = DataFrame(id = [1, 2], latitude = [cent_coordinates.latitude, cent_coordinates.latitude + 1], longitude = [cent_coordinates.longitude, cent_coordinates.longitude])
+        P.calculate_distance!(df, dist_rule, cent_coordinates)
+        @test "latitude" ∉ names(df) 
+        @test "longitude" ∉ names(df)
+        @test df.id == [1, 2]
+        @test "proximity_city_center" ∈ names(df)
+
+
         # - a listing at the city center has distance 0
         # - one degree of latitude north of the center is about 111.19 km (atol = 0.05)
         # - delete = true removes latitude and longitude (if the team keeps this behaviour)
-        @test_broken false
+        # @test_broken false
     end
  
     # ------------------------------------------------------------------------------------------
