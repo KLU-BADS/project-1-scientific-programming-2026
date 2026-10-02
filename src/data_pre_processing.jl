@@ -137,17 +137,37 @@ Returns the modified DataFrame in place.
 function set_types!(df::DataFrame, types::Dict{Symbol,DataType})
     # 1. find the requested columns that do not exist in the table
     missing_cols = setdiff(collect(keys(types)), propertynames(df))
+    # keys(types) are the column names we should convert, e.g. :price and :beds
+    # propertynames(df) are the columns that really exist in the table
+    # setdiff keeps only the names that are in the first list but not in the second
+
     # 2. stop with a clear message before anything is changed
     isempty(missing_cols) || error("set_types!: columns not found in data: $(join(missing_cols, ", "))")
+    # isempty(...) is true when no column is missing, then `||` skips the error and we continue
+    # otherwise error(...) stops the function and names the missing columns
+    # because this happens first, a typo in a column name never leaves a half-converted table
+
     # 3. convert every listed column into a new vector first, nothing is written to the table yet
     converted = Dict(col => Union{Missing,T}[convert_value(v, T) for v in df[!, col]] for (col, T) in types)
+    # for (col, T) in types: go through every listed column (col) with its target type (T)
+    # for v in df[!, col]: go through every single value (v) of that column
+    # convert_value(v, T): clean and convert one value ("$1,712.00" -> 1712.0, missing stays missing)
+    # Union{Missing,T}[...]: collect the results in a vector that may contain missing values
+    # col => ...: store the new vector under the column name in the dictionary `converted`
+    # if one value cannot be converted, convert_value throws an error here and df is still unchanged
+
     # 4. only now write the converted columns into the table (so a failed conversion leaves df untouched)
     for (col, values) in converted
-        # replace the old column with the converted one
+        # go through every converted column: col is its name, values is the new vector
+        
+        # 5. replace the old column with the converted one
         df[!, col] = values
+        # df[!, col] selects the whole column; assigning to it swaps in the new vector
+        # columns that are not in `types` are never touched
     end
-    # 5. return the table
+    # 6. return the table
     return df
+    # the same DataFrame object is returned, so the caller can chain functions in the pipeline
 end
 
 """
