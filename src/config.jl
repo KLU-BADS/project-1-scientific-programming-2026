@@ -58,12 +58,11 @@ const CONFIG = (
     # Configuration for convert_currency!(): every amount is converted to base_currency
     currency_rules = (
         columns = [:price, :estimated_revenue],
-        base_currency = "USD",
-        exchange_rates = Dict(                    # value of 1 unit of the currency in EUR
-            "USD" => 1.0,
-        # add one line per new currency, e.g. "USD" => 0.92
-        # rates as of <date>, source: <e.g. ECB reference rate>
-        ),
+        base_currency = "EUR",
+        exchange_rates = Dict("USD" => 0.89, "EUR" => 1.0),
+        # value of 1 unit of the currency in EUR (1 USD = 0.89 EUR)
+        # add one line per new currency
+        # rates as of 2 Oct 2026, source: Morningstar
     ),
 
     # Configuration for remove_duplicates!(): reference column for the removal of duplicates.
