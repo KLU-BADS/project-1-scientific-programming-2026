@@ -329,11 +329,41 @@ Returns the modified DataFrame in place.
 """
 function process_missing!(df::DataFrame, rules::Vector{Pair{Symbol,Symbol}})
     for (col, rule) in rules
+        # rules comes from config.jl, e.g. :price => :drop_row, so no column names are written here
+        # (col, rule) splits each pair: col is the column name, rule says what to do with its empty cells
+        # the order matters, a later rule already sees the table changed by the earlier rules
         if rule == :drop_row
+            # 1. drop_row: delete every row where this column is empty
+            rows_to_delete = Int[]
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    # df[row, col] is one cell, ismissing(x) is true if the cell is empty
+                    push!(rows_to_delete, row)
+                    # push! adds the row number to the end of the list
+                end
+            end
+            deleteat!(df, rows_to_delete)
+            # deleteat! removes these rows from df itself (in place)
+            # the row numbers are collected first and deleted together at the end,
+            # deleting inside the loop would shift the row numbers and skip rows
+            # 1:nrow(df) goes from top to bottom, so the list is already sorted as deleteat! needs it
 
         elseif rule == :fill_zero
+            # 2. fill_zero: write 0 into every empty cell of this column
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    df[row, col] = 0
+                    # writes 0 into this one empty cell, df itself changes (the ! in the name)
+                end
+            end
+            # e.g. reviews_per_month: an empty cell means the listing got no reviews, so 0 is the true value
+            # the column holds Float64 numbers (set_types!), so Julia stores the 0 as 0.0 by itself
 
         elseif rule == :impute_median_by_room_type
+            # 3. impute_median_by_room_type: the helper fills the empty cells
+            impute_median_by_room_type!(df, col)
+            # the helper (#75) uses the median of the same room type, so this branch stays one line
+            # a room type without any known value stays missing, the helper does not crash there
 
         elseif rule == :impute_median_or_drop_entire_home
 
@@ -343,6 +373,10 @@ function process_missing!(df::DataFrame, rules::Vector{Pair{Symbol,Symbol}})
             error("Unknown missing value rule :$rule for column :$col")
         end
     end
+
+    # 6. return the table
+    return df
+    # the docstring promises the modified DataFrame, the stub did not return anything yet
 end
 
 """
