@@ -366,6 +366,22 @@ function process_missing!(df::DataFrame, rules::Vector{Pair{Symbol,Symbol}})
             # a room type without any known value stays missing, the helper does not crash there
 
         elseif rule == :impute_median_or_drop_entire_home
+            # 4. impute_median_or_drop_entire_home: delete empty entire homes, fill the other room types
+            rows_to_delete = Int[]
+            for row in 1:nrow(df)
+                if ismissing(df[row, col]) && isequal(df[row, :room_type], CONFIG.entire_home_label)
+                    push!(rows_to_delete, row)
+                end
+            end
+            # && = both must be true: the cell is empty and the listing is an entire home
+            # CONFIG.entire_home_label is "Entire home/apt" from config.jl, so the text is not written here (slide 40)
+            # isequal is used like in impute_median_by_room_type!, it also works if a room type itself were missing
+            deleteat!(df, rows_to_delete)
+            # deleteat! removes these rows from df itself, same as in drop_row
+            impute_median_by_room_type!(df, col)
+            # the remaining empty cells belong to other room types, the helper fills them with their median
+            # deleting first matters: if the helper ran first, it would also fill the entire homes
+            # e.g. most missing bedrooms are private rooms and 96% of them have 1 bedroom, entire homes vary too much
 
         elseif rule == :fill_from_bathrooms_text
 
