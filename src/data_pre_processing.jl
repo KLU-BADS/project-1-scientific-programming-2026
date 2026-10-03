@@ -319,7 +319,18 @@ end
 """
     process_missing!(df, rules)
 
-Apply the configured missing-value rules to each column in sequence.
+Apply the configured missing-value rules to each column in sequence. The rules are applied from top to bottom,
+so a later rule already sees the table changed by the earlier ones, and a column can appear more than once.
+
+- `:drop_row`:                          delete the rows where the column is missing.
+- `:fill_zero`:                         replace missing values with 0.
+- `:impute_median_by_room_type`:        replace missing values with the median of the same room type.
+- `:impute_median_or_drop_entire_home`: delete the missing rows of entire homes (`CONFIG.entire_home_label`),
+                                        fill the other room types with their median.
+- `:fill_from_bathrooms_text`:          fill missing values from the `bathrooms_text` column with `parse_bathrooms`,
+                                        delete the rows where no number is found ("0 baths" gives 0 and stays).
+
+An error is raised for an unknown rule.
 
 # Arguments
 - `df::DataFrame`:                      Input data frame.
