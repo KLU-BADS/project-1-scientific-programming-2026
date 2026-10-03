@@ -384,6 +384,24 @@ function process_missing!(df::DataFrame, rules::Vector{Pair{Symbol,Symbol}})
             # e.g. most missing bedrooms are private rooms and 96% of them have 1 bedroom, entire homes vary too much
 
         elseif rule == :fill_from_bathrooms_text
+            # 5. fill_from_bathrooms_text: read the number from the bathroom text, then delete rows that still have none
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    df[row, col] = parse_bathrooms(df[row, :bathrooms_text])
+                end
+            end
+            # parse_bathrooms (#74) reads one text, e.g. "1.5 shared baths" gives 1.5 and "Half-bath" gives 0.5
+            # if the text has no number or is empty too, it gives missing back and the cell stays empty
+            # :bathrooms_text is written here because this rule is about exactly that column, its name says so
+            rows_to_delete = Int[]
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    push!(rows_to_delete, row)
+                end
+            end
+            deleteat!(df, rows_to_delete)
+            # rows whose bathrooms are still empty cannot be guessed, so they are deleted like in drop_row
+            # "0 baths" gives 0.0 and is not deleted here, remove_if_zero! handles zeros later in the pipeline
 
         else
             error("Unknown missing value rule :$rule for column :$col")
