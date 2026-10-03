@@ -120,7 +120,39 @@ is multiplied by the rate for `currency`, an error is raised for unknown currenc
 Returns the modified DataFrame in place.
 """
 function convert_currency!(df::DataFrame, rules::NamedTuple, currency::String)
+    # 1. stop if the currency of the data has no exchange rate
+    haskey(rules.exchange_rates, currency) || error("convert_currency!: unknown currency: $currency")
+    # haskey checks if the currency (e.g. "USD") is one of the keys in the exchange rates
+    # if not, error(...) stops the function and names the unknown currency
+    
+    # 2. get the exchange rate and stop if it is zero or negative
+    rate = rules.exchange_rates[currency]
+    # the rate says how many EUR 1 unit of this currency is worth, e.g. 0.89 for USD
+    rate > 0 || error("convert_currency!: exchange rate for $currency must be positive, got $rate")
+    # a rate of 0 or below would give zero or negative amounts, so it is not allowed
+    
+    # 3. stop if a column from the rules does not exist in the table
+    missing_cols = setdiff(rules.columns, propertynames(df))
+    # setdiff keeps the columns from the rules that the table does not have
+    isempty(missing_cols) || error("convert_currency!: columns not found in data: $(join(missing_cols, ", "))")
+    # no missing column means we continue, otherwise the error names the missing columns
 
+    # 4. multiply every listed column by the rate into a new vector first, nothing is written yet
+    converted = Dict(col => df[!, col] .* rate for col in rules.columns)
+    # df[!, col] .* rate multiplies every value of the column by the rate (the dot means "for each value")
+    # missing values stay missing, because missing times a number is missing
+    # if a column contains text, this fails here and df is still unchanged
+
+    # 5. only now write the converted columns into the table
+    for (col, values) in converted
+        # go through every converted column: col is its name, values is the new vector
+        df[!, col] = values
+        # replace the old column with the converted one
+        # columns that are not listed in the rules are never touched
+    end
+    # 6. return the table
+    return df
+    # the same DataFrame object is returned, so the caller can chain functions in the pipeline
 end
 
 """
@@ -182,7 +214,30 @@ Remove duplicate rows based on the columns specified in `check_columns`.
 Returns the modified DataFrame in place.
 """
 function remove_duplicates!(df::DataFrame, check_columns::Vector{Symbol})
+    # 1. stop if a column from check_columns does not exist in the table
+    missing_cols = setdiff(check_columns, propertynames(df))
+    # check_columns are the columns that identify a listing, e.g. [:id]
+    # propertynames(df) are the columns that really exist in the table
+    # setdiff keeps only the names that are in the first list but not in the second
 
+    # 2. stop with a clear message before anything is changed
+    isempty(missing_cols) || error("remove_duplicates!: columns not found in data: $(join(missing_cols, ", "))")
+    # isempty(...) is true when no column is missing, then `||` skips the error and we continue
+    # otherwise error(...) stops the function and names the missing columns
+    # because this happens first, a typo in a column name never changes the table
+
+    # 3. remove the repeated rows, comparing only the listed columns
+    unique!(df, check_columns)
+    # unique! goes through the rows from top to bottom and remembers the values of the check columns
+    # the first row with a new combination of values is kept, every later row with the same values is removed
+    # example: ids [1, 2, 1, 3, 2] become [1, 2, 3], the rows of the first 1 and the first 2 are kept
+    # only the check columns are compared, so two different listings with the same features (other columns) both stay
+    # with several check columns, a row is only a repeat if all of them are equal
+    # the ! at the end of unique! means that df itself is changed, no copy is made
+
+    # 4. return the table
+    return df
+    # the same DataFrame object is returned, so the caller can chain functions in the pipeline
 end
 
 """
