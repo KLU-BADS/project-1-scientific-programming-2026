@@ -214,7 +214,30 @@ Remove duplicate rows based on the columns specified in `check_columns`.
 Returns the modified DataFrame in place.
 """
 function remove_duplicates!(df::DataFrame, check_columns::Vector{Symbol})
+    # 1. stop if a column from check_columns does not exist in the table
+    missing_cols = setdiff(check_columns, propertynames(df))
+    # check_columns are the columns that identify a listing, e.g. [:id]
+    # propertynames(df) are the columns that really exist in the table
+    # setdiff keeps only the names that are in the first list but not in the second
 
+    # 2. stop with a clear message before anything is changed
+    isempty(missing_cols) || error("remove_duplicates!: columns not found in data: $(join(missing_cols, ", "))")
+    # isempty(...) is true when no column is missing, then `||` skips the error and we continue
+    # otherwise error(...) stops the function and names the missing columns
+    # because this happens first, a typo in a column name never changes the table
+
+    # 3. remove the repeated rows, comparing only the listed columns
+    unique!(df, check_columns)
+    # unique! goes through the rows from top to bottom and remembers the values of the check columns
+    # the first row with a new combination of values is kept, every later row with the same values is removed
+    # example: ids [1, 2, 1, 3, 2] become [1, 2, 3], the rows of the first 1 and the first 2 are kept
+    # only the check columns are compared, so two different listings with the same features (other columns) both stay
+    # with several check columns, a row is only a repeat if all of them are equal
+    # the ! at the end of unique! means that df itself is changed, no copy is made
+
+    # 4. return the table
+    return df
+    # the same DataFrame object is returned, so the caller can chain functions in the pipeline
 end
 
 """
