@@ -120,7 +120,39 @@ is multiplied by the rate for `currency`, an error is raised for unknown currenc
 Returns the modified DataFrame in place.
 """
 function convert_currency!(df::DataFrame, rules::NamedTuple, currency::String)
+    # 1. stop if the currency of the data has no exchange rate
+    haskey(rules.exchange_rates, currency) || error("convert_currency!: unknown currency: $currency")
+    # haskey checks if the currency (e.g. "USD") is one of the keys in the exchange rates
+    # if not, error(...) stops the function and names the unknown currency
+    
+    # 2. get the exchange rate and stop if it is zero or negative
+    rate = rules.exchange_rates[currency]
+    # the rate says how many EUR 1 unit of this currency is worth, e.g. 0.89 for USD
+    rate > 0 || error("convert_currency!: exchange rate for $currency must be positive, got $rate")
+    # a rate of 0 or below would give zero or negative amounts, so it is not allowed
+    
+    # 3. stop if a column from the rules does not exist in the table
+    missing_cols = setdiff(rules.columns, propertynames(df))
+    # setdiff keeps the columns from the rules that the table does not have
+    isempty(missing_cols) || error("convert_currency!: columns not found in data: $(join(missing_cols, ", "))")
+    # no missing column means we continue, otherwise the error names the missing columns
 
+    # 4. multiply every listed column by the rate into a new vector first, nothing is written yet
+    converted = Dict(col => df[!, col] .* rate for col in rules.columns)
+    # df[!, col] .* rate multiplies every value of the column by the rate (the dot means "for each value")
+    # missing values stay missing, because missing times a number is missing
+    # if a column contains text, this fails here and df is still unchanged
+
+    # 5. only now write the converted columns into the table
+    for (col, values) in converted
+        # go through every converted column: col is its name, values is the new vector
+        df[!, col] = values
+        # replace the old column with the converted one
+        # columns that are not listed in the rules are never touched
+    end
+    # 6. return the table
+    return df
+    # the same DataFrame object is returned, so the caller can chain functions in the pipeline
 end
 
 """

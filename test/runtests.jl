@@ -243,7 +243,70 @@ const P = Project1
         # - missing stays missing
         # - a currency that is not in rates throws an error with a clear message
         # - a rate of 0 or below throws an error
-        @test_broken false
+
+        # rules like in the config: the columns to convert, the target currency and the exchange rates
+        rules = (columns = [:price, :estimated_revenue], base_currency = "EUR", exchange_rates = Dict("USD" => 0.89, "EUR" => 1.0))
+        # 1 USD = 0.89 EUR (Morningstar, 2 Oct), the EUR rate is 1.0 because EUR is the target currency
+        bad_rules = (columns = [:price], base_currency = "EUR", exchange_rates = Dict("USD" => 0.89, "ZERO" => 0.0, "NEG" => -2.0))
+        # one rule set with a zero rate and a negative rate for the error test
+
+        # 1. dollar amounts are converted to euro, everything else stays as it is
+        df = DataFrame(price = [1712.0, 50.21, missing], estimated_revenue = [1000.0, 2000.0, 3000.0], name = ["a", "b", "c"])
+        # a small table with two money columns in USD (one with a missing value) and one text column
+        out = P.convert_currency!(df, rules, "USD")
+        # convert from USD with the rate 0.89, so every amount is multiplied by 0.89
+        @test isapprox(df.price[1], 1523.68)
+        # 1712.0 USD * 0.89 = 1523.68 EUR (isapprox because decimal numbers can differ in the last digit)
+        @test isapprox(df.price[2], 44.6869)
+        # 50.21 USD * 0.89 = 44.6869 EUR
+        @test ismissing(df.price[3])
+        # the missing value stays missing
+        @test isapprox(df.estimated_revenue, [890.0, 1780.0, 2670.0])
+        # the second money column is converted as well
+        @test df.name == ["a", "b", "c"]
+        # columns that are not listed in the rules are not touched
+        @test out === df
+        # the very same table object is returned, so it was changed in place
+
+        # 2. a column that is already in euro (rate 1.0) stays unchanged
+        df2 = DataFrame(price = [10.0, 20.0], estimated_revenue = [1.0, 2.0])
+        # new table
+        P.convert_currency!(df2, rules, "EUR")
+        # convert from EUR with the rate 1.0
+        @test df2.price == [10.0, 20.0]
+        # multiplying by 1.0 changes nothing
+        @test df2.estimated_revenue == [1.0, 2.0]
+        # same for the second column
+
+        # 3. an unknown currency throws an error that names the currency, and the table stays unchanged
+        df3 = DataFrame(price = [10.0], estimated_revenue = [100.0])
+        # new table
+        @test_throws ErrorException P.convert_currency!(df3, rules, "GBP")
+        # GBP is not in the exchange rates, so the function stops with an error
+        @test_throws "GBP" P.convert_currency!(df3, rules, "GBP")
+        # the error message contains the unknown currency
+        @test df3.price == [10.0]
+        # nothing was converted because the error came first
+
+        # 4. a rate that is zero or negative throws an error and leaves the table unchanged
+        df4 = DataFrame(price = [10.0])
+        # new table
+        @test_throws ErrorException P.convert_currency!(df4, bad_rules, "ZERO")
+        # a rate of 0.0 would turn every price into 0, so it is rejected
+        @test_throws ErrorException P.convert_currency!(df4, bad_rules, "NEG")
+        # a negative rate would give negative prices, so it is rejected as well
+        @test df4.price == [10.0]
+        # the table is unchanged after both errors
+
+        # 5. a column from the rules that does not exist in the table throws an error naming it
+        df5 = DataFrame(price = [10.0])
+        # this table has no estimated_revenue column, but the rules list it
+        @test_throws ErrorException P.convert_currency!(df5, rules, "USD")
+        # the function stops with an error
+        @test_throws "estimated_revenue" P.convert_currency!(df5, rules, "USD")
+        # the error message names the missing column
+        @test df5.price == [10.0]
+        # price is not converted either, because the check happens before any change
     end
  
     @testset "remove_duplicates! / remove_if_zero!" begin
