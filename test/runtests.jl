@@ -309,51 +309,96 @@ const P = Project1
         # price is not converted either, because the check happens before any change
     end
  
-    @testset "remove_duplicates! / remove_if_zero!" begin
-        # - remove_duplicates! keeps the first row of every id
-        # - remove_if_zero! removes rows with 0, leaves missing values alone
-        # - a 0 in any of several listed columns removes the row
-        @test_broken false
+    @testset "remove_duplicates!" begin
+        # 1. only the first row of every id is kept, the order of the rows does not change
+        df = DataFrame(id = [1, 2, 1, 3, 2], price = [10.0, 20.0, 99.0, 30.0, 88.0])
+        # the ids 1 and 2 appear twice, the repeated rows have different prices
+        out = P.remove_duplicates!(df, [:id])
+        # remove the repeats, comparing only the id
+        @test df.id == [1, 2, 3]
+        # every id is left once, in the order of its first appearance
+        @test df.price == [10.0, 20.0, 30.0]
+        # the first row of each id was kept (10.0, 20.0), not the later repeats (99.0, 88.0)
+        @test out === df
+        # the very same table object is returned, so it was changed in place
 
-        @testset "remove_if_zero!" begin
-            # Remove zero, preserve missing and row order.
-            df = DataFrame(a = [1, 0, 3, missing], b = [5, 6, 7, 8])
-            result = P.remove_if_zero!(df, [:a])
+        # 2. rows are compared on the id only: different listings with identical features all stay
+        df2 = DataFrame(id = [1, 2, 3], beds = [2.0, 2.0, 2.0])
+        # three different listings that happen to have the same features
+        P.remove_duplicates!(df2, [:id])
+        # remove duplicates by id, there are none
+        @test df2.id == [1, 2, 3]
+        # all three rows stay
+        @test df2.beds == [2.0, 2.0, 2.0]
+        # the values did not change
 
-            @test result === df
-            @test nrow(df) == 3
-            @test isequal(df.a, [1, 3, missing])
-            @test df.b == [5, 7, 8]
+        # 3. with several check columns a row is only a repeat if all of them are equal
+        df3 = DataFrame(id = [1, 1, 1], city = ["a", "a", "b"])
+        # the first two rows are equal in id and city, the third one differs in city
+        P.remove_duplicates!(df3, [:id, :city])
+        # compare on both columns
+        @test df3.id == [1, 1]
+        # one of the two equal rows is removed
+        @test df3.city == ["a", "b"]
+        # the first "a" row and the "b" row are left
 
-            # Zero in either column removes the row.
-            df = DataFrame(
-                id = [1, 2, 3, 4, 5],
-                a = [0, 2, missing, missing, 5],
-                b = [4, 0, 0, 8, 9],
-            )
-            P.remove_if_zero!(df, [:a, :b])
+        # 4. a table without duplicates stays as it is
+        df4 = DataFrame(id = [3, 1, 2])
+        # three different ids in no special order
+        P.remove_duplicates!(df4, [:id])
+        # nothing to remove
+        @test df4.id == [3, 1, 2]
+        # same rows, same order
 
-            @test df.id == [4, 5]
+        # 5. a column that does not exist throws an error naming it, and the table stays unchanged
+        df5 = DataFrame(id = [1, 1])
+        # this table has duplicates, but no column called nonexistent
+        @test_throws ErrorException P.remove_duplicates!(df5, [:nonexistent])
+        # the function stops with an error
+        @test_throws "nonexistent" P.remove_duplicates!(df5, [:nonexistent])
+        # the error message names the missing column
+        @test nrow(df5) == 2
+        # no row was removed, because the check happens before any change
+    end
 
-            # No columns to check means no rows are removed.
-            df = DataFrame(a = [0, 1])
-            P.remove_if_zero!(df, Symbol[])
+    @testset "remove_if_zero!" begin
+        # Remove zero, preserve missing and row order.
+        df = DataFrame(a = [1, 0, 3, missing], b = [5, 6, 7, 8])
+        result = P.remove_if_zero!(df, [:a])
 
-            @test df.a == [0, 1]
+        @test result === df
+        @test nrow(df) == 3
+        @test isequal(df.a, [1, 3, missing])
+        @test df.b == [5, 7, 8]
 
-            # Zero in both columns removes the row only once.
-            df = DataFrame(a = [0, 1], b = [0, 2])
-            P.remove_if_zero!(df, [:a, :b])
+        # Zero in either column removes the row.
+        df = DataFrame(
+            id = [1, 2, 3, 4, 5],
+            a = [0, 2, missing, missing, 5],
+            b = [4, 0, 0, 8, 9],
+        )
+        P.remove_if_zero!(df, [:a, :b])
 
-            @test nrow(df) == 1
-            @test df.a == [1]
+        @test df.id == [4, 5]
 
-            # Floats: 0.0 and -0.0 count as zero, missing stays.
-            df = DataFrame(a = [0.0, -0.0, 1.5, missing])
-            P.remove_if_zero!(df, [:a])
+        # No columns to check means no rows are removed.
+        df = DataFrame(a = [0, 1])
+        P.remove_if_zero!(df, Symbol[])
 
-            @test isequal(df.a, [1.5, missing])
-        end
+        @test df.a == [0, 1]
+
+        # Zero in both columns removes the row only once.
+        df = DataFrame(a = [0, 1], b = [0, 2])
+        P.remove_if_zero!(df, [:a, :b])
+
+        @test nrow(df) == 1
+        @test df.a == [1]
+
+        # Floats: 0.0 and -0.0 count as zero, missing stays.
+        df = DataFrame(a = [0.0, -0.0, 1.5, missing])
+        P.remove_if_zero!(df, [:a])
+
+        @test isequal(df.a, [1.5, missing])
     end
  
     @testset "parse_bathrooms" begin

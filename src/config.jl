@@ -66,7 +66,7 @@ const CONFIG = (
     ),
 
     # Configuration for remove_duplicates!(): reference column for the removal of duplicates.
-    duplicate_columns = [:id],
+    deduplicate_columns = [:id],
 
     # Configuration for remove_if_zero!(): rows with a value of 0 (no bookings in the last 365 days) are removed.
     # The denominators of ratio_rules are checked for 0 in the same way; they are taken from ratio_rules and not listed here.
