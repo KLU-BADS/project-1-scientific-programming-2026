@@ -374,7 +374,18 @@ end
 """
     process_missing!(df, rules)
 
-Apply the configured missing-value rules to each column in sequence.
+Apply the configured missing-value rules to each column in sequence. The rules are applied from top to bottom,
+so a later rule already sees the table changed by the earlier ones, and a column can appear more than once.
+
+- `:drop_row`:                          delete the rows where the column is missing.
+- `:fill_zero`:                         replace missing values with 0.
+- `:impute_median_by_room_type`:        replace missing values with the median of the same room type.
+- `:impute_median_or_drop_entire_home`: delete the missing rows of entire homes (`CONFIG.entire_home_label`),
+                                        fill the other room types with their median.
+- `:fill_from_bathrooms_text`:          fill missing values from the `bathrooms_text` column with `parse_bathrooms`,
+                                        delete the rows where no number is found ("0 baths" gives 0 and stays).
+
+An error is raised for an unknown rule.
 
 # Arguments
 - `df::DataFrame`:                      Input data frame.
@@ -384,20 +395,88 @@ Returns the modified DataFrame in place.
 """
 function process_missing!(df::DataFrame, rules::Vector{Pair{Symbol,Symbol}})
     for (col, rule) in rules
+        # rules comes from config.jl, e.g. :price => :drop_row, so no column names are written here
+        # (col, rule) splits each pair: col is the column name, rule says what to do with its empty cells
+        # the order matters, a later rule already sees the table changed by the earlier rules
         if rule == :drop_row
+            # 1. drop_row: delete every row where this column is empty
+            rows_to_delete = Int[]
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    # df[row, col] is one cell, ismissing(x) is true if the cell is empty
+                    push!(rows_to_delete, row)
+                    # push! adds the row number to the end of the list
+                end
+            end
+            deleteat!(df, rows_to_delete)
+            # deleteat! removes these rows from df itself (in place)
+            # the row numbers are collected first and deleted together at the end,
+            # deleting inside the loop would shift the row numbers and skip rows
+            # 1:nrow(df) goes from top to bottom, so the list is already sorted as deleteat! needs it
 
         elseif rule == :fill_zero
+            # 2. fill_zero: write 0 into every empty cell of this column
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    df[row, col] = 0
+                    # writes 0 into this one empty cell, df itself changes (the ! in the name)
+                end
+            end
+            # e.g. reviews_per_month: an empty cell means the listing got no reviews, so 0 is the true value
+            # the column holds Float64 numbers (set_types!), so Julia stores the 0 as 0.0 by itself
 
         elseif rule == :impute_median_by_room_type
+            # 3. impute_median_by_room_type: the helper fills the empty cells
+            impute_median_by_room_type!(df, col)
+            # the helper (#75) uses the median of the same room type, so this branch stays one line
+            # a room type without any known value stays missing, the helper does not crash there
 
         elseif rule == :impute_median_or_drop_entire_home
+            # 4. impute_median_or_drop_entire_home: delete empty entire homes, fill the other room types
+            rows_to_delete = Int[]
+            for row in 1:nrow(df)
+                if ismissing(df[row, col]) && isequal(df[row, :room_type], CONFIG.entire_home_label)
+                    push!(rows_to_delete, row)
+                end
+            end
+            # && = both must be true: the cell is empty and the listing is an entire home
+            # CONFIG.entire_home_label is "Entire home/apt" from config.jl, so a different city file only needs a config change
+            # isequal is used like in impute_median_by_room_type!, it also works if a room type itself were missing
+            deleteat!(df, rows_to_delete)
+            # deleteat! removes these rows from df itself, same as in drop_row
+            impute_median_by_room_type!(df, col)
+            # the remaining empty cells belong to other room types, the helper fills them with their median
+            # deleting first matters: if the helper ran first, it would also fill the entire homes
+            # e.g. most missing bedrooms are private rooms and 96% of them have 1 bedroom, entire homes vary too much
 
         elseif rule == :fill_from_bathrooms_text
+            # 5. fill_from_bathrooms_text: read the number from the bathroom text, then delete rows that still have none
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    df[row, col] = parse_bathrooms(df[row, :bathrooms_text])
+                end
+            end
+            # parse_bathrooms (#74) reads one text, e.g. "1.5 shared baths" gives 1.5 and "Half-bath" gives 0.5
+            # if the text has no number or is empty too, it gives missing back and the cell stays empty
+            # :bathrooms_text is written here because this rule is about exactly that column, its name says so
+            rows_to_delete = Int[]
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    push!(rows_to_delete, row)
+                end
+            end
+            deleteat!(df, rows_to_delete)
+            # rows whose bathrooms are still empty cannot be guessed, so they are deleted like in drop_row
+            # "0 baths" gives 0.0 and is not deleted here, remove_if_zero! handles zeros later in the pipeline
 
         else
             error("Unknown missing value rule :$rule for column :$col")
         end
     end
+
+    # 6. return the table
+    return df
+    # the docstring promises the modified DataFrame, the stub did not return anything yet
 end
 
 """

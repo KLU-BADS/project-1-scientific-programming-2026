@@ -473,7 +473,66 @@ const P = Project1
         #   "0 baths" gives 0 and is NOT removed here
         # - rules are applied in order (:x => :fill_zero before :x => :drop_row keeps the row)
         # - an unknown rule throws an ErrorException
-        @test_broken false
+        # 1. happy path: :drop_row removes the rows where the column is missing
+        df = DataFrame(id = [1, 2, 3, 4], price = [100.0, missing, 80.0, missing], beds = [missing, 2.0, 1.0, 3.0])
+        out = P.process_missing!(df, [:price => :drop_row])
+        @test df.id == [1, 3]
+        # the rows with id 2 and 4 had no price, so they are gone
+        @test df.price == [100.0, 80.0]
+        @test out === df
+        # === checks that the function returns the very same table, as promised in the docstring
+
+        # 2. nothing else changed: a column without a rule keeps its missing values
+        @test isequal(df.beds, [missing, 1.0])
+        # beds is not in the rules, so its empty cell stays empty
+        # isequal is used because missing == missing gives missing, not true
+
+        # 3. happy path: :fill_zero writes 0 into the empty cells and keeps every row
+        df2 = DataFrame(id = [1, 2, 3], reviews_per_month = [1.5, missing, 0.5])
+        P.process_missing!(df2, [:reviews_per_month => :fill_zero])
+        @test df2.reviews_per_month == [1.5, 0.0, 0.5]
+        @test nrow(df2) == 3
+
+        # 4. happy path: :impute_median_by_room_type uses the median of the same room type
+        df3 = DataFrame(room_type = ["Private room", "Private room", "Private room"], beds = [1.0, 3.0, missing])
+        P.process_missing!(df3, [:beds => :impute_median_by_room_type])
+        @test df3.beds == [1.0, 3.0, 2.0]
+        # the median of 1.0 and 3.0 is 2.0
+
+        # 5. happy path: :impute_median_or_drop_entire_home drops empty entire homes, fills the other room types
+        home = P.CONFIG.entire_home_label
+        df4 = DataFrame(id = [1, 2, 3, 4, 5], room_type = ["Private room", "Private room", "Private room", home, home],
+                        bedrooms = [1.0, 1.0, missing, 3.0, missing])
+        P.process_missing!(df4, [:bedrooms => :impute_median_or_drop_entire_home])
+        @test df4.id == [1, 2, 3, 4]
+        # only the entire home without bedrooms (id 5) is removed, the entire home with 3.0 stays
+        @test df4.bedrooms == [1.0, 1.0, 1.0, 3.0]
+        # the private room gets the median of its own room type (1.0)
+
+        # 6. happy path: :fill_from_bathrooms_text fills from the text and removes rows without a number
+        df5 = DataFrame(id = [1, 2, 3, 4, 5, 6],
+                        bathrooms_text = ["1 bath", "1.5 shared baths", "Half-bath", "Bathroom", "0 baths", missing],
+                        bathrooms = [2.0, missing, missing, missing, missing, missing])
+        P.process_missing!(df5, [:bathrooms => :fill_from_bathrooms_text])
+        @test df5.id == [1, 2, 3, 5]
+        # "Bathroom" has no number and id 6 has no text at all, so these two rows are removed
+        @test df5.bathrooms == [2.0, 1.5, 0.5, 0.0]
+        # id 1 keeps its known 2.0 (the text is only used for empty cells), "0 baths" gives 0.0 and stays
+
+        # 7. edge case: the rules are applied in order
+        df6 = DataFrame(id = [1, 2], x = [1.0, missing])
+        P.process_missing!(df6, [:x => :fill_zero, :x => :drop_row])
+        @test df6.id == [1, 2]
+        @test df6.x == [1.0, 0.0]
+        # fill_zero runs first, so drop_row finds nothing to remove
+        df7 = DataFrame(id = [1, 2], x = [1.0, missing])
+        P.process_missing!(df7, [:x => :drop_row, :x => :fill_zero])
+        @test df7.id == [1]
+        # the other way round the row is removed before fill_zero could fill it
+
+        # 8. error case: an unknown rule throws an ErrorException
+        @test_throws ErrorException P.process_missing!(DataFrame(x = [1.0, missing]), [:x => :fill_zeros])
+        # :fill_zeros is a typo, the else branch stops with a clear message
     end
  
     @testset "process_outliers!" begin

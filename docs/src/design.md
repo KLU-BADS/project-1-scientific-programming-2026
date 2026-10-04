@@ -32,7 +32,7 @@ In the following a detailed explaination is provided of each component and the f
         - convert_currency!() mutates a given input DataFrame. The function takes a DataFrame, a currency_rules NamedTuple (the columns holding monetary amounts, the base currency, and a table of exchange rates) and the currency of the city, then multiplies the specified columns by the exchange rate to convert all amounts into the base currency (necessary to compare cities or combine them in one model).
     
   ... (2.3) process all potential errors contained in the data set to avoid issues in later functions
-        - process_missing!() mutates a given input DataFrame. The function takes a DataFrame and column reference and uses and algorithm to find missing values and process them according to specified rules.
+        - process_missing!() mutates a given input DataFrame. The function takes a DataFrame and the missing_rules list (column => rule pairs) and applies the rules from top to bottom: rows with missing price, revenue, superhost or rating are dropped, empty reviews_per_month become 0, rows of entire homes with empty bedrooms or beds are dropped while the other room types get the median of their room type, and empty bathrooms are read from bathrooms_text with parse_bathrooms (rows without a number are dropped).
         - process_outliers!() mutates a given input DataFrame. The function takes a DataFrame and column reference and uses and algorithm to identify outliers and process them according to specified rules.
   
   ... (2.4) and uses the existing data to calculate new values relevant for the regression model
