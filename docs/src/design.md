@@ -60,15 +60,6 @@ In the following a detailed explaination is provided of each component and the f
 
 The interaction between the components/functions can be seen in the following section
 
-
-Note (Task Description): Describe the design of your project: its structure, what each component 
-is responsible for, how the components interact, and how they work. Also describe the data required and the output that is generated.
-
-Note (UML): UML diagrams provided in a `plantuml` block are automatically rendered when the
-documentation is built. You can find the PlantUML documentation [here](https://plantuml.com/).
-
-
-
 ## Components
 
 ```plantuml

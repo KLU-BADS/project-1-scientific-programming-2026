@@ -38,20 +38,201 @@ const P = Project1
     # data_pre_processing.jl
     # ------------------------------------------------------------------------------------------
  
-    @testset "convert_value / set_types!" begin
-        # - "\$1,250.00" becomes 1250.0 (currency sign and thousands separator are removed)
-        # - an Int becomes a Float64, missing stays missing
-        # - text that is not a number ("abc") throws an ArgumentError
-        # - set_types! converts every listed column, missing values stay missing,
-        #   and the column type is Union{Missing,Float64}
-        @test_broken false
+    @testset "convert_value" begin
+        # 1. text with currency sign and thousands separator
+        @test P.convert_value("\$1,250.00", Float64) == 1250.0
+        # "\$" is a dollar sign inside a string (a plain $ would start an interpolation)
+        # the $ and the comma are removed, then the rest is parsed as a Float64
+        @test P.convert_value("\$50.21", Float64) == 50.21
+        # a price without a thousands separator works the same way
+
+        # 2. plain number text (like beds or bathrooms in the CSV)
+        @test P.convert_value("3", Float64) == 3.0
+        # whole number as text becomes 3.0
+        @test P.convert_value("1.5", Float64) == 1.5
+        # decimal number as text
+
+        # 3. values that are already numbers
+        @test P.convert_value(3, Float64) == 3.0
+        # an Int becomes a Float64
+        @test P.convert_value(3, Float64) isa Float64
+        # isa checks the type, so we know it is really a Float64 and not an Int that equals 3.0
+        @test P.convert_value(2.5, Float64) == 2.5
+        # a Float64 stays as it is
+
+        # 4. missing values stay missing
+        @test ismissing(P.convert_value(missing, Float64))
+        # ismissing is needed here because missing == missing is not true, it is missing
+
+        # 5. empty text counts as missing
+        @test ismissing(P.convert_value("", Float64))
+        # an empty cell is a missing value, not a broken number
+
+        # 6. error case: text that is not a number
+        @test_throws ArgumentError P.convert_value("abc", Float64)
+        # the function must stop with an ArgumentError
+        @test_throws "abc" P.convert_value("abc", Float64)
+        # the message must contain the bad value, so the user knows what could not be parsed
     end
+
+    
+    @testset "set_types!" begin
+        # 1. normal case: a text column and an integer column become Float64
+        df = DataFrame(id = [1, 2, 3], price = ["\$1,712.00", "\$50.21", missing], beds = [1, 3, missing], name = ["a", "b", "c"])
+        # made-up table: price is text with a dollar sign like in the CSV, beds are integers, both contain a missing value
+        out = P.set_types!(df, Dict(:price => Float64, :beds => Float64))
+        # Dict(column => type) is the rulebook; only price and beds are listed
+        @test isequal(df.price, [1712.0, 50.21, missing])
+        # isequal is needed because missing == missing is not true, isequal treats two missing values as equal
+        @test isequal(df.beds, [1.0, 3.0, missing])
+        # integers become floats and the missing value stays missing
+        @test eltype(df.price) == Union{Missing,Float64}
+        # eltype gives the element type of the column; Union{Missing,Float64} means "Float64 values or missing"
+        @test eltype(df.beds) == Union{Missing,Float64}
+        # the same type for the second column
+        @test out === df
+        # the very same table object is returned, so it was changed in place
+
+        # 2. columns that are not listed stay as they are
+        @test df.id == [1, 2, 3]
+        # id has the same values as before
+        @test eltype(df.id) == Int
+        # and it is still an Int column, not a Float64 one
+        @test df.name == ["a", "b", "c"]
+        # a text column that is not in the Dict is not touched
+
+        # 3. a column without missing values also gets the type Union{Missing,Float64}
+        df2 = DataFrame(a = [1, 2])
+        # a fresh table with a column that has no missing value
+        P.set_types!(df2, Dict(:a => Float64))
+        # convert the only column
+        @test df2.a == [1.0, 2.0]
+        # the values are converted
+        @test eltype(df2.a) == Union{Missing,Float64}
+        # the type is the same as for columns with missing values, so later steps can rely on it
+
+        # 4. edge case: empty Dict
+        df3 = DataFrame(a = [1, 2])
+        # another fresh table
+        P.set_types!(df3, Dict{Symbol,DataType}())
+        # Dict{Symbol,DataType}() is an empty rulebook with the types the function expects
+        @test eltype(df3.a) == Int
+        # nothing was converted
+
+        # 5. error case: a listed column is not in the table
+        df4 = DataFrame(a = [1, 2])
+        # a fresh table with only column a
+        @test_throws ErrorException P.set_types!(df4, Dict(:nonexistent => Float64))
+        # the function must stop with an error
+        @test_throws "nonexistent" P.set_types!(df4, Dict(:nonexistent => Float64))
+        # the message must name the missing column
+
+        # 6. a failed conversion leaves the table untouched
+        df5 = DataFrame(a = ["1", "2"], b = ["x", "y"])
+        # column a can be converted, column b can not ("x" is not a number)
+        @test_throws ArgumentError P.set_types!(df5, Dict(:a => Float64, :b => Float64))
+        # the error comes from convert_value
+        @test df5.a == ["1", "2"]
+        # a was not converted, because all conversions run before anything is written
+        @test df5.b == ["x", "y"]
+        # b is still the original text
+    end
+
  
-    @testset "filter_columns / format_labels!" begin
-        # - only the listed columns are left
-        # - the original DataFrame still has all its columns (filter_columns returns a copy)
-        # - format_labels! renames the columns in the Dict in place and leaves the others alone
-        @test_broken false
+    @testset "filter_columns" begin
+        # 1. build a tiny made-up table for the test
+        df = DataFrame(id = [1, 2, 3], price = [100.0, 90.0, 50.0], junk = ["a", "b", "c"])
+        # DataFrame(name = values, ...) builds a table by hand: 3 rows, 3 columns
+        # "junk" stands for a column we do NOT want to keep
+
+        # 2. normal case: only the listed columns are left, the values are unchanged
+        out = P.filter_columns(df,[:id, :price])
+        # runs our function; P. is needed because the tests reach the package functions through P = Project1
+        # [:id, :price] is the list of columns to keep, written as Symbols like in CONFIG.relevant_columns
+        @test names(out) == ["id", "price"]
+        # names(out) gives the column names as Strings, so we compare with Strings, not Symbols
+        # this checks that "junk" is gone and that only the two wanted columns are left, in this order
+        @test out.price == [100.0, 90.0, 50.0]
+        # out.price is the price column of the result; the values must be exactly the same as before
+        @test nrow(out) == 3
+        # nrow = number of rows; filtering columns must never remove or add rows        
+
+        # 3. nothing else changed: the original keeps all its columns and is not linked to the copy
+        @test names(df) == ["id", "price", "junk"]
+        # the original table must still have all 3 columns, because filter_columns returns a copy
+        out[1, :price] = 999.0
+        # changes the price in row 1 of the RESULT to 999.0 (out[row, column] = new value)
+        @test df.price[1] == 100.0
+        # the original still has 100.0, so result and original are separate tables
+        # changing the result must not change the original, otherwise it would not be a real copy
+
+        # 4. edge case: a single column
+        @test names(P.filter_columns(df, [:id])) == ["id"]
+        # the smallest useful list has only one column; the function must still return a table with just that column
+
+        # 5. error case: a wanted column that does not exist stops with an error that names it
+        @test_throws ErrorException P.filter_columns(df, [:id, :nonexistent])
+        # passes only if the call stops with an error(...); :nonexistent is not in df, so it must fail
+        @test_throws "nonexistent" P.filter_columns(df, [:id, :nonexistent])
+        # a String as the first argument of @test_throws checks that the error message contains that word
+        # so the message must name the missing column and not just say "error"
+
+        # 6. a failed call leaves the table untouched
+        @test names(df) == ["id", "price", "junk"]
+        # after the two failed calls above, df must still be exactly as before
+        # this works because the check runs before select in the function
+    end 
+    
+    
+    @testset "format_labels!" begin
+        # 1. normal case: one column gets a new name
+        df = DataFrame(id = [1, 2, 3], host_is_superhost = [true, false, true], price = [100.0, 90.0, 50.0])
+        # tiny made-up table that uses the raw column names
+        out = P.format_labels!(df, Dict(:host_is_superhost => :is_superhost))
+        # Dict(old => new) is the rulebook; out is whatever the function returns
+        @test names(df) == ["id", "is_superhost", "price"]
+        # df itself was renamed (in place), and the order of the columns stayed the same
+        @test df.is_superhost == [true, false, true]
+        # the data under the new name is still the old data
+        @test out === df
+        # === checks that out is the very same table object, not a copy
+
+        # 2. nothing else changed
+        @test df.price == [100.0, 90.0, 50.0]
+        # a column that is not in the mapping keeps its name and its values
+        @test nrow(df) == 3
+        # no rows were lost
+
+        # 3. all three renames from the config at once
+        df2 = DataFrame(id = [1, 2], host_is_superhost = [true, false], number_of_reviews = [10, 20], estimated_revenue_l365d = [500.0, 800.0])
+        # a fresh table with the 3 raw names that CONFIG.label_mapping renames, plus one column (id) that must stay
+        P.format_labels!(df2, Dict(:host_is_superhost => :is_superhost, :number_of_reviews => :number_ratings, :estimated_revenue_l365d => :estimated_revenue))
+        # the same 3 renames as in config.jl, written out so the test does not break if someone edits the config
+        @test names(df2) == ["id", "is_superhost", "number_ratings", "estimated_revenue"]
+        # all three got their new names, id kept its name, and the order of the columns did not change
+        @test df2.number_ratings == [10, 20]
+        # the data under a renamed column is still the old data
+
+        # 4. edge case: empty mapping
+        df3 = DataFrame(a = [1, 2], b = [3, 4])
+        # another fresh table
+        P.format_labels!(df3, Dict{Symbol,Symbol}())
+        # Dict{Symbol,Symbol}() is an empty Dict with the types the function expects
+        @test names(df3) == ["a", "b"]
+        # an empty rulebook renames nothing
+
+        # 5. error case: a name in the mapping is not in the table
+        df4 = DataFrame(a = [1, 2], b = [3, 4])
+        @test_throws ErrorException P.format_labels!(df4, Dict(:nonexistent => :x))
+        # the function must stop with an error
+        @test_throws "nonexistent" P.format_labels!(df4, Dict(:nonexistent => :x))
+        # the message must name the missing column, so the user knows what is wrong
+
+        # 6. a failed call leaves the table untouched
+        @test_throws ErrorException P.format_labels!(df4, Dict(:a => :x, :nonexistent => :y))
+        # one valid rename (a => x) and one invalid key in the same call
+        @test names(df4) == ["a", "b"]
+        # nothing was renamed, not even the valid part, because the check runs before any change
     end
 
     @testset "convert_currency!" begin
@@ -62,26 +243,223 @@ const P = Project1
         # - missing stays missing
         # - a currency that is not in rates throws an error with a clear message
         # - a rate of 0 or below throws an error
-        @test_broken false
+
+        # rules like in the config: the columns to convert, the target currency and the exchange rates
+        rules = (columns = [:price, :estimated_revenue], base_currency = "EUR", exchange_rates = Dict("USD" => 0.89, "EUR" => 1.0))
+        # 1 USD = 0.89 EUR (Morningstar, 2 Oct), the EUR rate is 1.0 because EUR is the target currency
+        bad_rules = (columns = [:price], base_currency = "EUR", exchange_rates = Dict("USD" => 0.89, "ZERO" => 0.0, "NEG" => -2.0))
+        # one rule set with a zero rate and a negative rate for the error test
+
+        # 1. dollar amounts are converted to euro, everything else stays as it is
+        df = DataFrame(price = [1712.0, 50.21, missing], estimated_revenue = [1000.0, 2000.0, 3000.0], name = ["a", "b", "c"])
+        # a small table with two money columns in USD (one with a missing value) and one text column
+        out = P.convert_currency!(df, rules, "USD")
+        # convert from USD with the rate 0.89, so every amount is multiplied by 0.89
+        @test isapprox(df.price[1], 1523.68)
+        # 1712.0 USD * 0.89 = 1523.68 EUR (isapprox because decimal numbers can differ in the last digit)
+        @test isapprox(df.price[2], 44.6869)
+        # 50.21 USD * 0.89 = 44.6869 EUR
+        @test ismissing(df.price[3])
+        # the missing value stays missing
+        @test isapprox(df.estimated_revenue, [890.0, 1780.0, 2670.0])
+        # the second money column is converted as well
+        @test df.name == ["a", "b", "c"]
+        # columns that are not listed in the rules are not touched
+        @test out === df
+        # the very same table object is returned, so it was changed in place
+
+        # 2. a column that is already in euro (rate 1.0) stays unchanged
+        df2 = DataFrame(price = [10.0, 20.0], estimated_revenue = [1.0, 2.0])
+        # new table
+        P.convert_currency!(df2, rules, "EUR")
+        # convert from EUR with the rate 1.0
+        @test df2.price == [10.0, 20.0]
+        # multiplying by 1.0 changes nothing
+        @test df2.estimated_revenue == [1.0, 2.0]
+        # same for the second column
+
+        # 3. an unknown currency throws an error that names the currency, and the table stays unchanged
+        df3 = DataFrame(price = [10.0], estimated_revenue = [100.0])
+        # new table
+        @test_throws ErrorException P.convert_currency!(df3, rules, "GBP")
+        # GBP is not in the exchange rates, so the function stops with an error
+        @test_throws "GBP" P.convert_currency!(df3, rules, "GBP")
+        # the error message contains the unknown currency
+        @test df3.price == [10.0]
+        # nothing was converted because the error came first
+
+        # 4. a rate that is zero or negative throws an error and leaves the table unchanged
+        df4 = DataFrame(price = [10.0])
+        # new table
+        @test_throws ErrorException P.convert_currency!(df4, bad_rules, "ZERO")
+        # a rate of 0.0 would turn every price into 0, so it is rejected
+        @test_throws ErrorException P.convert_currency!(df4, bad_rules, "NEG")
+        # a negative rate would give negative prices, so it is rejected as well
+        @test df4.price == [10.0]
+        # the table is unchanged after both errors
+
+        # 5. a column from the rules that does not exist in the table throws an error naming it
+        df5 = DataFrame(price = [10.0])
+        # this table has no estimated_revenue column, but the rules list it
+        @test_throws ErrorException P.convert_currency!(df5, rules, "USD")
+        # the function stops with an error
+        @test_throws "estimated_revenue" P.convert_currency!(df5, rules, "USD")
+        # the error message names the missing column
+        @test df5.price == [10.0]
+        # price is not converted either, because the check happens before any change
     end
  
-    @testset "remove_duplicates! / remove_if_zero!" begin
-        # - remove_duplicates! keeps the first row of every id
-        # - remove_if_zero! removes rows with 0, leaves missing values alone
-        # - a 0 in any of several listed columns removes the row
-        @test_broken false
+    @testset "remove_duplicates!" begin
+        # 1. only the first row of every id is kept, the order of the rows does not change
+        df = DataFrame(id = [1, 2, 1, 3, 2], price = [10.0, 20.0, 99.0, 30.0, 88.0])
+        # the ids 1 and 2 appear twice, the repeated rows have different prices
+        out = P.remove_duplicates!(df, [:id])
+        # remove the repeats, comparing only the id
+        @test df.id == [1, 2, 3]
+        # every id is left once, in the order of its first appearance
+        @test df.price == [10.0, 20.0, 30.0]
+        # the first row of each id was kept (10.0, 20.0), not the later repeats (99.0, 88.0)
+        @test out === df
+        # the very same table object is returned, so it was changed in place
+
+        # 2. rows are compared on the id only: different listings with identical features all stay
+        df2 = DataFrame(id = [1, 2, 3], beds = [2.0, 2.0, 2.0])
+        # three different listings that happen to have the same features
+        P.remove_duplicates!(df2, [:id])
+        # remove duplicates by id, there are none
+        @test df2.id == [1, 2, 3]
+        # all three rows stay
+        @test df2.beds == [2.0, 2.0, 2.0]
+        # the values did not change
+
+        # 3. with several check columns a row is only a repeat if all of them are equal
+        df3 = DataFrame(id = [1, 1, 1], city = ["a", "a", "b"])
+        # the first two rows are equal in id and city, the third one differs in city
+        P.remove_duplicates!(df3, [:id, :city])
+        # compare on both columns
+        @test df3.id == [1, 1]
+        # one of the two equal rows is removed
+        @test df3.city == ["a", "b"]
+        # the first "a" row and the "b" row are left
+
+        # 4. a table without duplicates stays as it is
+        df4 = DataFrame(id = [3, 1, 2])
+        # three different ids in no special order
+        P.remove_duplicates!(df4, [:id])
+        # nothing to remove
+        @test df4.id == [3, 1, 2]
+        # same rows, same order
+
+        # 5. a column that does not exist throws an error naming it, and the table stays unchanged
+        df5 = DataFrame(id = [1, 1])
+        # this table has duplicates, but no column called nonexistent
+        @test_throws ErrorException P.remove_duplicates!(df5, [:nonexistent])
+        # the function stops with an error
+        @test_throws "nonexistent" P.remove_duplicates!(df5, [:nonexistent])
+        # the error message names the missing column
+        @test nrow(df5) == 2
+        # no row was removed, because the check happens before any change
+    end
+
+    @testset "remove_if_zero!" begin
+        # Remove zero, preserve missing and row order.
+        df = DataFrame(a = [1, 0, 3, missing], b = [5, 6, 7, 8])
+        result = P.remove_if_zero!(df, [:a])
+
+        @test result === df
+        @test nrow(df) == 3
+        @test isequal(df.a, [1, 3, missing])
+        @test df.b == [5, 7, 8]
+
+        # Zero in either column removes the row.
+        df = DataFrame(
+            id = [1, 2, 3, 4, 5],
+            a = [0, 2, missing, missing, 5],
+            b = [4, 0, 0, 8, 9],
+        )
+        P.remove_if_zero!(df, [:a, :b])
+
+        @test df.id == [4, 5]
+
+        # No columns to check means no rows are removed.
+        df = DataFrame(a = [0, 1])
+        P.remove_if_zero!(df, Symbol[])
+
+        @test df.a == [0, 1]
+
+        # Zero in both columns removes the row only once.
+        df = DataFrame(a = [0, 1], b = [0, 2])
+        P.remove_if_zero!(df, [:a, :b])
+
+        @test nrow(df) == 1
+        @test df.a == [1]
+
+        # Floats: 0.0 and -0.0 count as zero, missing stays.
+        df = DataFrame(a = [0.0, -0.0, 1.5, missing])
+        P.remove_if_zero!(df, [:a])
+
+        @test isequal(df.a, [1.5, missing])
     end
  
     @testset "parse_bathrooms" begin
         # - "1 bath" -> 1.0, "1.5 shared baths" -> 1.5, "0 baths" -> 0.0, "Half-bath" -> 0.5
         # - "Bathroom" (no number) and missing -> missing
-        @test_broken false
+        # 1. the four texts from the spec
+        @test P.parse_bathrooms("1 bath") == 1.0
+        # P. is needed because the tests reach the package functions through P = Project1
+        @test P.parse_bathrooms("1.5 shared baths") == 1.5
+        @test P.parse_bathrooms("0 baths") == 0.0
+        # zero is a real number, so the answer is 0.0 and not missing (remove_if_zero! deals with it later)
+        @test P.parse_bathrooms("Half-bath") == 0.5
+        # "half" has no number in the text, so the function returns 0.5
+
+        # 2. text without a number and a missing value both give missing
+        @test ismissing(P.parse_bathrooms("Bathroom"))
+        # ismissing is used because missing == missing gives missing, not true, so @test could not judge it
+        @test ismissing(P.parse_bathrooms(missing))
+
+        # 3. the remaining branches: empty text, half with a prefix, capital letters
+        @test ismissing(P.parse_bathrooms(""))
+        # an empty text has no words, so the isempty(words) line returns missing
+        @test P.parse_bathrooms("Shared half-bath") == 0.5
+        # Airbnb writes it like this too, occursin finds "half" anywhere in the text
+        @test P.parse_bathrooms("2 Baths") == 2.0
+        # the capital B must not matter, because the text is lowercased first
     end
  
     @testset "impute_median_by_room_type!" begin
         # - a missing value gets the median of the same room type, not of all rows
         # - a room type without any known value is left untouched (no error)
-        @test_broken false
+        # 1. a missing value gets the median of its own room type
+        df = DataFrame(room_type = ["Private room", "Private room", "Private room", "Entire home/apt", "Entire home/apt", "Entire home/apt"],
+                       bedrooms = [1.0, 3.0, missing, 4.0, 6.0, missing])
+        # tiny made-up table: each room type has two known values and one missing
+        # the median of all known values would be 3.5, so a wrong answer would be noticed
+        out = P.impute_median_by_room_type!(df, :bedrooms)
+        @test df.bedrooms == [1.0, 3.0, 2.0, 4.0, 6.0, 5.0]
+        # private rooms: median of 1.0 and 3.0 is 2.0, entire homes: median of 4.0 and 6.0 is 5.0
+        # the known values stay as they were
+        @test out === df
+        # === checks that the function returns the very same table, as promised in the docstring
+        @test df.room_type == ["Private room", "Private room", "Private room", "Entire home/apt", "Entire home/apt", "Entire home/apt"]
+        # the room_type column is not changed, only the empty bedrooms cells are filled
+
+        # 2. a room type without any known value is left untouched (no error)
+        df2 = DataFrame(room_type = ["Private room", "Hotel room", "Private room"], beds = [2.0, missing, missing])
+        P.impute_median_by_room_type!(df2, :beds)
+        # "Hotel room" has no known value, the call must still run without an error
+        @test ismissing(df2.beds[2])
+        # the hotel room stays missing
+        @test df2.beds[3] == 2.0
+        # the private room next to it is still filled with the median of its own type
+
+        # 3. nothing to fill: the table stays as it is
+        df3 = DataFrame(room_type = ["Private room", "Private room"], bedrooms = [1.0, 2.0])
+        P.impute_median_by_room_type!(df3, :bedrooms)
+        @test df3.bedrooms == [1.0, 2.0]
+        # without missing values nothing is changed
+        @test df3.room_type == ["Private room", "Private room"]
+        # the room_type column is never touched
     end
  
     @testset "process_missing!" begin
@@ -108,26 +486,105 @@ const P = Project1
     end
  
     @testset "format_dummies!" begin
-        # use the real rules: only(filter(r -> r.target == :has_washer, P.CONFIG.dummy_rules))
+        washer_rule = only(filter(r -> r.target == :has_washer, P.CONFIG.dummy_rules))
+        pool_rule = only(filter(r -> r.target == :has_pool, P.CONFIG.dummy_rules))
+        superhost_rule = only(filter(r -> r.target == :is_superhost, P.CONFIG.dummy_rules))
+       
+        df = DataFrame(amenities = ["[\"Washer\", \"Wifi\"]", "[\"Dishwasher\"]"])
+        P.format_dummies!(df, washer_rule)
+        @test df.has_washer == [1, 0]
+
+        df = DataFrame(amenities = ["[\"Pool\"]", "[\"Pool table\"]"])
+        P.format_dummies!(df, pool_rule)
+        @test df.has_pool == [1, 0]
+        @test eltype(df.has_pool) == Int
+
+        df = DataFrame(is_superhost = ["t", "f"])
+        P.format_dummies!(df, superhost_rule)
+        @test df.is_superhost == [1, 0]
+        @test eltype(df.is_superhost) == Int
+        
+        washer_delete_rule = merge(washer_rule, (delete = true,))
+        df = DataFrame(id = [1, 2], amenities = ["[\"Washer\"]", "[\"Wifi\"]"])
+        P.format_dummies!(df, washer_delete_rule)
+        remaining_columns = names(df)
+        @test "amenities" ∉ remaining_columns 
+        @test df.has_washer == [1, 0]
+        @test df.id == [1, 2]
         # - "Washer" -> 1, "Dishwasher" -> 0 for has_washer; "Pool" -> 1, "Pool table" -> 0 for has_pool
         # - the new column holds whole numbers (eltype Int)
         # - is_superhost "t"/"f" becomes 1/0 in the same column
         # - delete = true removes the source column
-        @test_broken false
+        #@test_broken false
     end
  
     @testset "calculate_ratio!" begin
+        col_col_rule = only(filter(r -> r.target == :ratio_beds_bedrooms, P.CONFIG.ratio_rules))
+        col_fixnum_rule = only(filter(r -> r.target == :occupancy_rate, P.CONFIG.ratio_rules))
+
+        df = DataFrame(beds = [2, 3], bedrooms = [1, 2])
+        P.calculate_ratio!(df, col_col_rule)
+        @test df.ratio_beds_bedrooms == [2.0, 1.5]
+
+        df = DataFrame(estimated_occupancy_l365d = [73, 146])
+        P.calculate_ratio!(df, col_fixnum_rule)
+        @test df.occupancy_rate == [0.2, 0.4]
+        
+
+        del_col_col_rule = merge(col_col_rule, (delete = true,))
+        df = DataFrame(id = [1, 2], beds = [2, 3], bedrooms = [1, 2])
+        P.calculate_ratio!(df, del_col_col_rule)
+        remaining_columns = names(df)
+        @test "beds" ∉ remaining_columns 
+        @test "bedrooms" ∉ remaining_columns 
+        @test df.ratio_beds_bedrooms == [2.0, 1.5]
+        @test df.id == [1, 2]
+
+        del_col_fixnum_rule = merge(col_fixnum_rule, (delete = true,))
+        df = DataFrame(id = [1, 2], estimated_occupancy_l365d = [73, 146])
+        P.calculate_ratio!(df, del_col_fixnum_rule)
+        remaining_columns = names(df)
+        @test "estimated_occupancy_l365d" ∉ remaining_columns  
+        @test df.occupancy_rate == [0.2, 0.4]
+        @test df.id == [1, 2]
+
+        df = DataFrame(beds = [2, 3], bedrooms = [1, missing])
+        @test_throws ErrorException P.calculate_ratio!(df, col_col_rule)
+
+        df = DataFrame(beds = [2, 3], bedrooms = [1, 0])
+        @test_throws ErrorException P.calculate_ratio!(df, col_col_rule)
         # - column / column and column / fixed number (365)
         # - delete = true removes the source columns
         # - a 0 or a missing value in the denominator throws an ErrorException
-        @test_broken false
+        #@test_broken false
     end
  
     @testset "calculate_distance!" begin
+            # 1: Get inputs
+        dist_rule = P.CONFIG.distance_rule 
+        cent_coordinates = P.CONFIG.cities[P.CONFIG.city].center 
+
+        # 2: Distance to center is 0 test 
+        df = DataFrame(latitude = [cent_coordinates.latitude], longitude = [cent_coordinates.longitude])
+        P.calculate_distance!(df, dist_rule, cent_coordinates)
+        @test df.proximity_city_center ≈ [0.0] atol = 0.05
+
+        # 3: Distance to center is 1 degree north test 
+        df = DataFrame(latitude = [cent_coordinates.latitude + 1], longitude = [cent_coordinates.longitude])
+        P.calculate_distance!(df, dist_rule, cent_coordinates)
+        @test df.proximity_city_center ≈ [111.19] atol = 0.05
+
+        # 4: Testing if delete removes latitude and longitude 
+        df = DataFrame(id = [1, 2], latitude = [cent_coordinates.latitude, cent_coordinates.latitude + 1], longitude = [cent_coordinates.longitude, cent_coordinates.longitude])
+        P.calculate_distance!(df, dist_rule, cent_coordinates)
+        @test "latitude" ∉ names(df) 
+        @test "longitude" ∉ names(df)
+        @test df.id == [1, 2]
+        @test "proximity_city_center" ∈ names(df)
         # - a listing at the city center has distance 0
         # - one degree of latitude north of the center is about 111.19 km (atol = 0.05)
         # - delete = true removes latitude and longitude (if the team keeps this behaviour)
-        @test_broken false
+        # @test_broken false
     end
  
     # ------------------------------------------------------------------------------------------
