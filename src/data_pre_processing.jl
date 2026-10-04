@@ -19,7 +19,7 @@ function filter_columns(df::DataFrame, relevant_columns::Vector{Symbol})
     # so missing_cols holds the wanted columns that the file does not have (empty if all exist)
 
     # 2. stop with a clear message if a column is missing
-    isempty(missing_cols) || error("filter_columns: colummns not found in data: $(join(missing_cols, ", "))")
+    isempty(missing_cols) || error("filter_columns: columns not found in data: $(join(missing_cols, ", "))")
     # isempty(x) is true if the list has no elements
     # cond || error(...) = the error only runs if the condition is false, i.e. if something is missing
     # $(...) puts a value into the text; join(list, ", ") turns the list into "a, b, c"
