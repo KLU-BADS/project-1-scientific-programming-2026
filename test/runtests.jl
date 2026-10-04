@@ -165,7 +165,7 @@ const P = Project1
         df_percent = P.split_dataset(df, 20; random_selection = true, seed = 42)
         @test df_rand == df_percent
 
-        # error handling: values - 0, 1.0, 100, -5, 1000 and a split that leaves a set empty throw an ErrorException
+        # error handling: values - 0, 1.0, 100, -5, 1000 and a split that leaves a set empty throw an ArgumentError
         @test_throws ArgumentError P.split_dataset(df, 0; random_selection = true, seed = 42)
         @test_throws ArgumentError P.split_dataset(df, 1.0; random_selection = true, seed = 42)
         @test_throws ArgumentError P.split_dataset(df, -5; random_selection = true, seed = 42)
