@@ -236,6 +236,37 @@ const P = Project1
             variable = [1, -2, 22.5, 10000, ℯ - 1]
         )
         @test_throws DomainError P.prepare_predictors(df_error_negative, specs)
+
+        # boundary: exactly -1 is invalid (log1p(-1) = -Inf), just above -1 is valid
+        @test_throws DomainError P.prepare_predictors(DataFrame(variable = [1.0, -1.0]), specs)
+        df_above = P.prepare_predictors(DataFrame(variable = [-0.5, 0.0]), specs)
+        @test df_above.variable ≈ [log(0.5), 0.0]
+    end
+
+        @testset "prepare_dependent" begin
+        df = DataFrame(price = [100.0, 200.0], x = [1.0, 2.0])
+
+        # log scale: new column log_<target>, original columns kept, input unchanged
+        data, dependent = P.prepare_dependent(df, (target = :price, log_scale = true))
+        @test dependent == :log_price
+        @test data.log_price ≈ log.([100.0, 200.0])
+        @test data.price == [100.0, 200.0]
+        @test ncol(data) == ncol(df) + 1
+        @test df == DataFrame(price = [100.0, 200.0], x = [1.0, 2.0])
+
+        # no log scale: an unchanged copy and the target itself as dependent variable
+        data_plain, dependent_plain = P.prepare_dependent(df, (target = :price, log_scale = false))
+        @test dependent_plain == :price
+        @test data_plain == df
+        @test data_plain !== df
+
+        # boundary: a small positive value works, 0 and negative values do not
+        @test P.prepare_dependent(DataFrame(price = [1e-10, 1.0]), (target = :price, log_scale = true))[2] == :log_price
+        @test_throws DomainError P.prepare_dependent(DataFrame(price = [100.0, 0.0]), (target = :price, log_scale = true))
+        @test_throws DomainError P.prepare_dependent(DataFrame(price = [100.0, -5.0]), (target = :price, log_scale = true))
+
+        # missing values
+        @test_throws MissingException P.prepare_dependent(DataFrame(price = [100.0, missing]), (target = :price, log_scale = true))
     end
 
     @testset "regression_city / predict_apartment_performance / evaluate_regression" begin
@@ -268,6 +299,36 @@ const P = Project1
         @test predict_apartment_performance(fit, df) ≈ df.price rtol = 1e-6
         @test df.reviews == reviews_before
 
+        # imperfect fit on the original scale: values can be checked by hand
+        # x = 1:4, price = [2, 5, 6, 9] → OLS line price = 2.2x (intercept 0)
+        # predictions 2.2, 4.4, 6.6, 8.8 → absolute errors 0.2, 0.6, 0.6, 0.2
+        # SSE = 0.8, SST = 25 → R² = 1 - 0.8 / 25 = 0.968
+        noisy = DataFrame(x = [1.0, 2.0, 3.0, 4.0], price = [2.0, 5.0, 6.0, 9.0])
+        spec_noisy = (target = :price, log_scale = false, log1p_predictors = Symbol[], predictors = [:x])
+        fit_noisy = regression_city(noisy, spec_noisy)
+        score_noisy = evaluate_regression(fit_noisy, noisy)
+        @test score_noisy.n == 4
+        @test score_noisy.r2 ≈ 0.968 atol = 1e-8
+        @test score_noisy.r2_model_scale ≈ score_noisy.r2              # same scale without log
+        @test score_noisy.mae ≈ 0.4 atol = 1e-8
+        @test score_noisy.median_ae ≈ 0.4 atol = 1e-8
+
+        # imperfect fit on the log scale: R² below 1, both R² values differ, smearing > 1
+        noisy_log = DataFrame(x = [1.0, 2.0, 3.0, 4.0])
+        noisy_log.price = exp.(1.0 .+ 0.5 .* noisy_log.x) .* [1.1, 0.9, 1.05, 0.95]
+        spec_noisy_log = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x])
+        fit_noisy_log = regression_city(noisy_log, spec_noisy_log)
+        score_noisy_log = evaluate_regression(fit_noisy_log, noisy_log)
+        @test 0 < score_noisy_log.r2 < 1
+        @test 0 < score_noisy_log.r2_model_scale < 1
+        @test score_noisy_log.r2 != score_noisy_log.r2_model_scale
+        @test fit_noisy_log.smearing > 1.0                             # mean of exp(residuals) > 1 if residuals are not all 0
+
+        # a target <= 0 in the test set is an error for log models, but not for models on the original scale
+        test_zero = DataFrame(x = [1.0, 2.0], price = [3.0, 0.0])
+        @test_throws DomainError evaluate_regression(fit_noisy_log, test_zero)
+        @test evaluate_regression(fit_noisy, test_zero) isa NamedTuple
+
         # missing values (GLM would drop those rows silently) and a target of 0 on the log scale are errors
         with_missing = DataFrame(x = [1.0, 2.0, missing, 4.0], price = [1.0, 2.0, 3.0, 4.0])
         @test_throws MissingException regression_city(with_missing, (target = :price, log_scale = false, log1p_predictors = Symbol[], predictors = [:x]))
@@ -285,23 +346,24 @@ const P = Project1
         y_hat_1 = [1, 2, 3, 4]
         @test P.get_r2(y1,y_hat_1) == 1
 
-        # test sample with expected R-squared of 0
+        # R² is undefined for constant y.
         y_hat_0 = [2.5, 2.5, 2.5, 2.5]
         @test P.get_r2(y1,y_hat_0) == 0
 
-         # test sample with expected R-squared of 0.5       
+        # test sample with expected R-squared of 0.5       
         y_hat_0_5 = [1, 2, 4]
         @test P.get_r2(y2, y_hat_0_5) ≈ 0.5
 
-         # test sample with expected R-squared of -3 
+        # test sample with expected R-squared of -3 
         y_hat_minus_3 = [3, 2, 1]
         @test P.get_r2(y2, y_hat_minus_3) ≈ -3
 
-        # test sample with expected R-squared of ≈ 1 - 9/42
-        y_hat_swapped = [1, 2, 3]
-                @test P.get_r2(y_hat_0_5, y2) ≈ 1 - 9/42
+        # swapped arguments of the 0.5 case give a different R² (the argument order matters)
+        y3 = [1, 2, 4]
+        y_hat_3 = [1, 2, 3]
+        @test P.get_r2(y3, y_hat_3) ≈ 1 - 9/42
 
-        # test if function throws error for verctors with different lengths
+        # test if function throws error for vectors with different lengths
         @test_throws DimensionMismatch P.get_r2(y1,y2)
         # test if function throws error for same values
         @test_throws ArgumentError P.get_r2([5, 5, 5], [4, 5, 6]) 
