@@ -77,11 +77,67 @@ const P = Project1
 
     
     @testset "set_types!" begin
+        # 1. normal case: a text column and an integer column become Float64
+        df = DataFrame(id = [1, 2, 3], price = ["\$1,712.00", "\$50.21", missing], beds = [1, 3, missing], name = ["a", "b", "c"])
+        # made-up table: price is text with a dollar sign like in the CSV, beds are integers, both contain a missing value
+        out = P.set_types!(df, Dict(:price => Float64, :beds => Float64))
+        # Dict(column => type) is the rulebook; only price and beds are listed
+        @test isequal(df.price, [1712.0, 50.21, missing])
+        # isequal is needed because missing == missing is not true, isequal treats two missing values as equal
+        @test isequal(df.beds, [1.0, 3.0, missing])
+        # integers become floats and the missing value stays missing
+        @test eltype(df.price) == Union{Missing,Float64}
+        # eltype gives the element type of the column; Union{Missing,Float64} means "Float64 values or missing"
+        @test eltype(df.beds) == Union{Missing,Float64}
+        # the same type for the second column
+        @test out === df
+        # the very same table object is returned, so it was changed in place
 
-        # - set_types! converts every listed column, missing values stay missing,
-        #   and the column type is Union{Missing,Float64}
-        @test_broken false
+        # 2. columns that are not listed stay as they are
+        @test df.id == [1, 2, 3]
+        # id has the same values as before
+        @test eltype(df.id) == Int
+        # and it is still an Int column, not a Float64 one
+        @test df.name == ["a", "b", "c"]
+        # a text column that is not in the Dict is not touched
+
+        # 3. a column without missing values also gets the type Union{Missing,Float64}
+        df2 = DataFrame(a = [1, 2])
+        # a fresh table with a column that has no missing value
+        P.set_types!(df2, Dict(:a => Float64))
+        # convert the only column
+        @test df2.a == [1.0, 2.0]
+        # the values are converted
+        @test eltype(df2.a) == Union{Missing,Float64}
+        # the type is the same as for columns with missing values, so later steps can rely on it
+
+        # 4. edge case: empty Dict
+        df3 = DataFrame(a = [1, 2])
+        # another fresh table
+        P.set_types!(df3, Dict{Symbol,DataType}())
+        # Dict{Symbol,DataType}() is an empty rulebook with the types the function expects
+        @test eltype(df3.a) == Int
+        # nothing was converted
+
+        # 5. error case: a listed column is not in the table
+        df4 = DataFrame(a = [1, 2])
+        # a fresh table with only column a
+        @test_throws ErrorException P.set_types!(df4, Dict(:nonexistent => Float64))
+        # the function must stop with an error
+        @test_throws "nonexistent" P.set_types!(df4, Dict(:nonexistent => Float64))
+        # the message must name the missing column
+
+        # 6. a failed conversion leaves the table untouched
+        df5 = DataFrame(a = ["1", "2"], b = ["x", "y"])
+        # column a can be converted, column b can not ("x" is not a number)
+        @test_throws ArgumentError P.set_types!(df5, Dict(:a => Float64, :b => Float64))
+        # the error comes from convert_value
+        @test df5.a == ["1", "2"]
+        # a was not converted, because all conversions run before anything is written
+        @test df5.b == ["x", "y"]
+        # b is still the original text
     end
+
  
     @testset "filter_columns" begin
         # 1. build a tiny made-up table for the test
@@ -187,66 +243,223 @@ const P = Project1
         # - missing stays missing
         # - a currency that is not in rates throws an error with a clear message
         # - a rate of 0 or below throws an error
-        @test_broken false
+
+        # rules like in the config: the columns to convert, the target currency and the exchange rates
+        rules = (columns = [:price, :estimated_revenue], base_currency = "EUR", exchange_rates = Dict("USD" => 0.89, "EUR" => 1.0))
+        # 1 USD = 0.89 EUR (Morningstar, 2 Oct), the EUR rate is 1.0 because EUR is the target currency
+        bad_rules = (columns = [:price], base_currency = "EUR", exchange_rates = Dict("USD" => 0.89, "ZERO" => 0.0, "NEG" => -2.0))
+        # one rule set with a zero rate and a negative rate for the error test
+
+        # 1. dollar amounts are converted to euro, everything else stays as it is
+        df = DataFrame(price = [1712.0, 50.21, missing], estimated_revenue = [1000.0, 2000.0, 3000.0], name = ["a", "b", "c"])
+        # a small table with two money columns in USD (one with a missing value) and one text column
+        out = P.convert_currency!(df, rules, "USD")
+        # convert from USD with the rate 0.89, so every amount is multiplied by 0.89
+        @test isapprox(df.price[1], 1523.68)
+        # 1712.0 USD * 0.89 = 1523.68 EUR (isapprox because decimal numbers can differ in the last digit)
+        @test isapprox(df.price[2], 44.6869)
+        # 50.21 USD * 0.89 = 44.6869 EUR
+        @test ismissing(df.price[3])
+        # the missing value stays missing
+        @test isapprox(df.estimated_revenue, [890.0, 1780.0, 2670.0])
+        # the second money column is converted as well
+        @test df.name == ["a", "b", "c"]
+        # columns that are not listed in the rules are not touched
+        @test out === df
+        # the very same table object is returned, so it was changed in place
+
+        # 2. a column that is already in euro (rate 1.0) stays unchanged
+        df2 = DataFrame(price = [10.0, 20.0], estimated_revenue = [1.0, 2.0])
+        # new table
+        P.convert_currency!(df2, rules, "EUR")
+        # convert from EUR with the rate 1.0
+        @test df2.price == [10.0, 20.0]
+        # multiplying by 1.0 changes nothing
+        @test df2.estimated_revenue == [1.0, 2.0]
+        # same for the second column
+
+        # 3. an unknown currency throws an error that names the currency, and the table stays unchanged
+        df3 = DataFrame(price = [10.0], estimated_revenue = [100.0])
+        # new table
+        @test_throws ErrorException P.convert_currency!(df3, rules, "GBP")
+        # GBP is not in the exchange rates, so the function stops with an error
+        @test_throws "GBP" P.convert_currency!(df3, rules, "GBP")
+        # the error message contains the unknown currency
+        @test df3.price == [10.0]
+        # nothing was converted because the error came first
+
+        # 4. a rate that is zero or negative throws an error and leaves the table unchanged
+        df4 = DataFrame(price = [10.0])
+        # new table
+        @test_throws ErrorException P.convert_currency!(df4, bad_rules, "ZERO")
+        # a rate of 0.0 would turn every price into 0, so it is rejected
+        @test_throws ErrorException P.convert_currency!(df4, bad_rules, "NEG")
+        # a negative rate would give negative prices, so it is rejected as well
+        @test df4.price == [10.0]
+        # the table is unchanged after both errors
+
+        # 5. a column from the rules that does not exist in the table throws an error naming it
+        df5 = DataFrame(price = [10.0])
+        # this table has no estimated_revenue column, but the rules list it
+        @test_throws ErrorException P.convert_currency!(df5, rules, "USD")
+        # the function stops with an error
+        @test_throws "estimated_revenue" P.convert_currency!(df5, rules, "USD")
+        # the error message names the missing column
+        @test df5.price == [10.0]
+        # price is not converted either, because the check happens before any change
     end
  
-    @testset "remove_duplicates! / remove_if_zero!" begin
-        # - remove_duplicates! keeps the first row of every id
-        # - remove_if_zero! removes rows with 0, leaves missing values alone
-        # - a 0 in any of several listed columns removes the row
-        @test_broken false
+    @testset "remove_duplicates!" begin
+        # 1. only the first row of every id is kept, the order of the rows does not change
+        df = DataFrame(id = [1, 2, 1, 3, 2], price = [10.0, 20.0, 99.0, 30.0, 88.0])
+        # the ids 1 and 2 appear twice, the repeated rows have different prices
+        out = P.remove_duplicates!(df, [:id])
+        # remove the repeats, comparing only the id
+        @test df.id == [1, 2, 3]
+        # every id is left once, in the order of its first appearance
+        @test df.price == [10.0, 20.0, 30.0]
+        # the first row of each id was kept (10.0, 20.0), not the later repeats (99.0, 88.0)
+        @test out === df
+        # the very same table object is returned, so it was changed in place
 
-        @testset "remove_if_zero!" begin
-            # Remove zero, preserve missing and row order.
-            df = DataFrame(a = [1, 0, 3, missing], b = [5, 6, 7, 8])
-            result = P.remove_if_zero!(df, [:a])
+        # 2. rows are compared on the id only: different listings with identical features all stay
+        df2 = DataFrame(id = [1, 2, 3], beds = [2.0, 2.0, 2.0])
+        # three different listings that happen to have the same features
+        P.remove_duplicates!(df2, [:id])
+        # remove duplicates by id, there are none
+        @test df2.id == [1, 2, 3]
+        # all three rows stay
+        @test df2.beds == [2.0, 2.0, 2.0]
+        # the values did not change
 
-            @test result === df
-            @test nrow(df) == 3
-            @test isequal(df.a, [1, 3, missing])
-            @test df.b == [5, 7, 8]
+        # 3. with several check columns a row is only a repeat if all of them are equal
+        df3 = DataFrame(id = [1, 1, 1], city = ["a", "a", "b"])
+        # the first two rows are equal in id and city, the third one differs in city
+        P.remove_duplicates!(df3, [:id, :city])
+        # compare on both columns
+        @test df3.id == [1, 1]
+        # one of the two equal rows is removed
+        @test df3.city == ["a", "b"]
+        # the first "a" row and the "b" row are left
 
-            # Zero in either column removes the row.
-            df = DataFrame(
-                id = [1, 2, 3, 4, 5],
-                a = [0, 2, missing, missing, 5],
-                b = [4, 0, 0, 8, 9],
-            )
-            P.remove_if_zero!(df, [:a, :b])
+        # 4. a table without duplicates stays as it is
+        df4 = DataFrame(id = [3, 1, 2])
+        # three different ids in no special order
+        P.remove_duplicates!(df4, [:id])
+        # nothing to remove
+        @test df4.id == [3, 1, 2]
+        # same rows, same order
 
-            @test df.id == [4, 5]
+        # 5. a column that does not exist throws an error naming it, and the table stays unchanged
+        df5 = DataFrame(id = [1, 1])
+        # this table has duplicates, but no column called nonexistent
+        @test_throws ErrorException P.remove_duplicates!(df5, [:nonexistent])
+        # the function stops with an error
+        @test_throws "nonexistent" P.remove_duplicates!(df5, [:nonexistent])
+        # the error message names the missing column
+        @test nrow(df5) == 2
+        # no row was removed, because the check happens before any change
+    end
 
-            # No columns to check means no rows are removed.
-            df = DataFrame(a = [0, 1])
-            P.remove_if_zero!(df, Symbol[])
+    @testset "remove_if_zero!" begin
+        # Remove zero, preserve missing and row order.
+        df = DataFrame(a = [1, 0, 3, missing], b = [5, 6, 7, 8])
+        result = P.remove_if_zero!(df, [:a])
 
-            @test df.a == [0, 1]
+        @test result === df
+        @test nrow(df) == 3
+        @test isequal(df.a, [1, 3, missing])
+        @test df.b == [5, 7, 8]
 
-            # Zero in both columns removes the row only once.
-            df = DataFrame(a = [0, 1], b = [0, 2])
-            P.remove_if_zero!(df, [:a, :b])
+        # Zero in either column removes the row.
+        df = DataFrame(
+            id = [1, 2, 3, 4, 5],
+            a = [0, 2, missing, missing, 5],
+            b = [4, 0, 0, 8, 9],
+        )
+        P.remove_if_zero!(df, [:a, :b])
 
-            @test nrow(df) == 1
-            @test df.a == [1]
+        @test df.id == [4, 5]
 
-            # Floats: 0.0 and -0.0 count as zero, missing stays.
-            df = DataFrame(a = [0.0, -0.0, 1.5, missing])
-            P.remove_if_zero!(df, [:a])
+        # No columns to check means no rows are removed.
+        df = DataFrame(a = [0, 1])
+        P.remove_if_zero!(df, Symbol[])
 
-            @test isequal(df.a, [1.5, missing])
-        end
+        @test df.a == [0, 1]
+
+        # Zero in both columns removes the row only once.
+        df = DataFrame(a = [0, 1], b = [0, 2])
+        P.remove_if_zero!(df, [:a, :b])
+
+        @test nrow(df) == 1
+        @test df.a == [1]
+
+        # Floats: 0.0 and -0.0 count as zero, missing stays.
+        df = DataFrame(a = [0.0, -0.0, 1.5, missing])
+        P.remove_if_zero!(df, [:a])
+
+        @test isequal(df.a, [1.5, missing])
     end
  
     @testset "parse_bathrooms" begin
         # - "1 bath" -> 1.0, "1.5 shared baths" -> 1.5, "0 baths" -> 0.0, "Half-bath" -> 0.5
         # - "Bathroom" (no number) and missing -> missing
-        @test_broken false
+        # 1. the four texts from the spec
+        @test P.parse_bathrooms("1 bath") == 1.0
+        # P. is needed because the tests reach the package functions through P = Project1
+        @test P.parse_bathrooms("1.5 shared baths") == 1.5
+        @test P.parse_bathrooms("0 baths") == 0.0
+        # zero is a real number, so the answer is 0.0 and not missing (remove_if_zero! deals with it later)
+        @test P.parse_bathrooms("Half-bath") == 0.5
+        # "half" has no number in the text, so the function returns 0.5
+
+        # 2. text without a number and a missing value both give missing
+        @test ismissing(P.parse_bathrooms("Bathroom"))
+        # ismissing is used because missing == missing gives missing, not true, so @test could not judge it
+        @test ismissing(P.parse_bathrooms(missing))
+
+        # 3. the remaining branches: empty text, half with a prefix, capital letters
+        @test ismissing(P.parse_bathrooms(""))
+        # an empty text has no words, so the isempty(words) line returns missing
+        @test P.parse_bathrooms("Shared half-bath") == 0.5
+        # Airbnb writes it like this too, occursin finds "half" anywhere in the text
+        @test P.parse_bathrooms("2 Baths") == 2.0
+        # the capital B must not matter, because the text is lowercased first
     end
  
     @testset "impute_median_by_room_type!" begin
         # - a missing value gets the median of the same room type, not of all rows
         # - a room type without any known value is left untouched (no error)
-        @test_broken false
+        # 1. a missing value gets the median of its own room type
+        df = DataFrame(room_type = ["Private room", "Private room", "Private room", "Entire home/apt", "Entire home/apt", "Entire home/apt"],
+                       bedrooms = [1.0, 3.0, missing, 4.0, 6.0, missing])
+        # tiny made-up table: each room type has two known values and one missing
+        # the median of all known values would be 3.5, so a wrong answer would be noticed
+        out = P.impute_median_by_room_type!(df, :bedrooms)
+        @test df.bedrooms == [1.0, 3.0, 2.0, 4.0, 6.0, 5.0]
+        # private rooms: median of 1.0 and 3.0 is 2.0, entire homes: median of 4.0 and 6.0 is 5.0
+        # the known values stay as they were
+        @test out === df
+        # === checks that the function returns the very same table, as promised in the docstring
+        @test df.room_type == ["Private room", "Private room", "Private room", "Entire home/apt", "Entire home/apt", "Entire home/apt"]
+        # the room_type column is not changed, only the empty bedrooms cells are filled
+
+        # 2. a room type without any known value is left untouched (no error)
+        df2 = DataFrame(room_type = ["Private room", "Hotel room", "Private room"], beds = [2.0, missing, missing])
+        P.impute_median_by_room_type!(df2, :beds)
+        # "Hotel room" has no known value, the call must still run without an error
+        @test ismissing(df2.beds[2])
+        # the hotel room stays missing
+        @test df2.beds[3] == 2.0
+        # the private room next to it is still filled with the median of its own type
+
+        # 3. nothing to fill: the table stays as it is
+        df3 = DataFrame(room_type = ["Private room", "Private room"], bedrooms = [1.0, 2.0])
+        P.impute_median_by_room_type!(df3, :bedrooms)
+        @test df3.bedrooms == [1.0, 2.0]
+        # without missing values nothing is changed
+        @test df3.room_type == ["Private room", "Private room"]
+        # the room_type column is never touched
     end
  
     @testset "process_missing!" begin
@@ -260,7 +473,66 @@ const P = Project1
         #   "0 baths" gives 0 and is NOT removed here
         # - rules are applied in order (:x => :fill_zero before :x => :drop_row keeps the row)
         # - an unknown rule throws an ErrorException
-        @test_broken false
+        # 1. happy path: :drop_row removes the rows where the column is missing
+        df = DataFrame(id = [1, 2, 3, 4], price = [100.0, missing, 80.0, missing], beds = [missing, 2.0, 1.0, 3.0])
+        out = P.process_missing!(df, [:price => :drop_row])
+        @test df.id == [1, 3]
+        # the rows with id 2 and 4 had no price, so they are gone
+        @test df.price == [100.0, 80.0]
+        @test out === df
+        # === checks that the function returns the very same table, as promised in the docstring
+
+        # 2. nothing else changed: a column without a rule keeps its missing values
+        @test isequal(df.beds, [missing, 1.0])
+        # beds is not in the rules, so its empty cell stays empty
+        # isequal is used because missing == missing gives missing, not true
+
+        # 3. happy path: :fill_zero writes 0 into the empty cells and keeps every row
+        df2 = DataFrame(id = [1, 2, 3], reviews_per_month = [1.5, missing, 0.5])
+        P.process_missing!(df2, [:reviews_per_month => :fill_zero])
+        @test df2.reviews_per_month == [1.5, 0.0, 0.5]
+        @test nrow(df2) == 3
+
+        # 4. happy path: :impute_median_by_room_type uses the median of the same room type
+        df3 = DataFrame(room_type = ["Private room", "Private room", "Private room"], beds = [1.0, 3.0, missing])
+        P.process_missing!(df3, [:beds => :impute_median_by_room_type])
+        @test df3.beds == [1.0, 3.0, 2.0]
+        # the median of 1.0 and 3.0 is 2.0
+
+        # 5. happy path: :impute_median_or_drop_entire_home drops empty entire homes, fills the other room types
+        home = P.CONFIG.entire_home_label
+        df4 = DataFrame(id = [1, 2, 3, 4, 5], room_type = ["Private room", "Private room", "Private room", home, home],
+                        bedrooms = [1.0, 1.0, missing, 3.0, missing])
+        P.process_missing!(df4, [:bedrooms => :impute_median_or_drop_entire_home])
+        @test df4.id == [1, 2, 3, 4]
+        # only the entire home without bedrooms (id 5) is removed, the entire home with 3.0 stays
+        @test df4.bedrooms == [1.0, 1.0, 1.0, 3.0]
+        # the private room gets the median of its own room type (1.0)
+
+        # 6. happy path: :fill_from_bathrooms_text fills from the text and removes rows without a number
+        df5 = DataFrame(id = [1, 2, 3, 4, 5, 6],
+                        bathrooms_text = ["1 bath", "1.5 shared baths", "Half-bath", "Bathroom", "0 baths", missing],
+                        bathrooms = [2.0, missing, missing, missing, missing, missing])
+        P.process_missing!(df5, [:bathrooms => :fill_from_bathrooms_text])
+        @test df5.id == [1, 2, 3, 5]
+        # "Bathroom" has no number and id 6 has no text at all, so these two rows are removed
+        @test df5.bathrooms == [2.0, 1.5, 0.5, 0.0]
+        # id 1 keeps its known 2.0 (the text is only used for empty cells), "0 baths" gives 0.0 and stays
+
+        # 7. edge case: the rules are applied in order
+        df6 = DataFrame(id = [1, 2], x = [1.0, missing])
+        P.process_missing!(df6, [:x => :fill_zero, :x => :drop_row])
+        @test df6.id == [1, 2]
+        @test df6.x == [1.0, 0.0]
+        # fill_zero runs first, so drop_row finds nothing to remove
+        df7 = DataFrame(id = [1, 2], x = [1.0, missing])
+        P.process_missing!(df7, [:x => :drop_row, :x => :fill_zero])
+        @test df7.id == [1]
+        # the other way round the row is removed before fill_zero could fill it
+
+        # 8. error case: an unknown rule throws an ErrorException
+        @test_throws ErrorException P.process_missing!(DataFrame(x = [1.0, missing]), [:x => :fill_zeros])
+        # :fill_zeros is a typo, the else branch stops with a clear message
     end
  
     @testset "process_outliers!" begin
@@ -407,10 +679,31 @@ const P = Project1
     end
  
     @testset "calculate_distance!" begin
+            # 1: Get inputs
+        dist_rule = P.CONFIG.distance_rule 
+        cent_coordinates = P.CONFIG.cities[P.CONFIG.city].center 
+
+        # 2: Distance to center is 0 test 
+        df = DataFrame(latitude = [cent_coordinates.latitude], longitude = [cent_coordinates.longitude])
+        P.calculate_distance!(df, dist_rule, cent_coordinates)
+        @test df.proximity_city_center ≈ [0.0] atol = 0.05
+
+        # 3: Distance to center is 1 degree north test 
+        df = DataFrame(latitude = [cent_coordinates.latitude + 1], longitude = [cent_coordinates.longitude])
+        P.calculate_distance!(df, dist_rule, cent_coordinates)
+        @test df.proximity_city_center ≈ [111.19] atol = 0.05
+
+        # 4: Testing if delete removes latitude and longitude 
+        df = DataFrame(id = [1, 2], latitude = [cent_coordinates.latitude, cent_coordinates.latitude + 1], longitude = [cent_coordinates.longitude, cent_coordinates.longitude])
+        P.calculate_distance!(df, dist_rule, cent_coordinates)
+        @test "latitude" ∉ names(df) 
+        @test "longitude" ∉ names(df)
+        @test df.id == [1, 2]
+        @test "proximity_city_center" ∈ names(df)
         # - a listing at the city center has distance 0
         # - one degree of latitude north of the center is about 111.19 km (atol = 0.05)
         # - delete = true removes latitude and longitude (if the team keeps this behaviour)
-        @test_broken false
+        # @test_broken false
     end
  
     # ------------------------------------------------------------------------------------------
@@ -418,24 +711,245 @@ const P = Project1
     # ------------------------------------------------------------------------------------------
  
     @testset "split_dataset" begin
-        # - 100 rows with 0.2 give 80 training and 20 test rows, no overlap, nothing lost
-        # - both sets keep the original row order, the original DataFrame is unchanged
-        # - 20 (percent) gives the same split as 0.2
+        # standard call with random permutation: create test data set then split into training and test sets with random permutation
+        df = DataFrame(a = 1:100, b = 101:200)
+        df_rand = P.split_dataset(df, 0.2; random_selection = true, seed = 42)
+        # 100 rows with 0.2 give 80 training and 20 test rows, no overlap, nothing lost
+        @test nrow(df_rand[1]) == 0.8 * 100
+        @test nrow(df_rand[2]) == 0.2 * 100
+        @test isempty(intersect(df_rand[1].a, df_rand[2].a))
+        @test length(union(df_rand[1].a, df_rand[2].a)) == 100
+        
+        # original unchanged: original DataFrame df remains unchanged
+        @test df == DataFrame(a = 1:100, b = 101:200)
+
+        # random_selection = false: create test data set, then split into training and test sets without random permutation
+        df_ordered = P.split_dataset(df, 0.2; random_selection = false)
+        # return values are in order
+        @test df_ordered[1].a == 1:80
+        @test df_ordered[1].b == 101:180
+        @test df_ordered[2].a == 81:100
+        @test df_ordered[2].b == 181:200       
+        
         # - the same seed gives the same split, another seed a different one
-        # - random_selection = false takes the last rows as test set
-        # - 0, 1.0, 100, -5, 1000 and a split that leaves a set empty throw an ErrorException
-        @test_broken false
+        df_same_seed = P.split_dataset(df, 0.2; random_selection = true, seed = 42)
+        df_new_seed = P.split_dataset(df, 0.2; random_selection = true, seed = 87)
+        @test df_same_seed == df_rand
+        @test df_same_seed != df_new_seed   
+
+        # percentage split: percentage value returns the same as decimal value
+        df_percent = P.split_dataset(df, 20; random_selection = true, seed = 42)
+        @test df_rand == df_percent
+
+        # error handling: values - 0, 1.0, 100, -5, 1000 and a split that leaves a set empty throw an ArgumentError
+        @test_throws ArgumentError P.split_dataset(df, 0; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 1.0; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, -5; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 100; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 1000; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 0.00001; random_selection = true, seed = 42)
+        @test_throws ArgumentError P.split_dataset(df, 0.99999; random_selection = true, seed = 42)
     end
  
+    @testset "prepare_predictors" begin
+        # create the data frame
+        df = DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+
+        # create specs
+        specs = (log1p_predictors = Symbol[:variable],)
+
+        # call function with test data
+        df_log1p = P.prepare_predictors(df, specs)
+
+        # correct values?
+        @test df_log1p.variable ≈ [log1p(1),log1p(0),log1p(22.5),log1p(10000),log1p(ℯ - 1)]
+        
+        # non-specified columns unchanged?
+        @test df_log1p.fixed ≈ 1:5
+        
+        # input DataFrame remains unchanged?
+        @test df == DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+
+        # input consistent: same output for input with the same values
+        df_2 = DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+        @test isequal(P.prepare_predictors(df, specs), P.prepare_predictors(df_2, specs))
+
+        # column names unchanged?
+        @test names(df_log1p) == names(df)
+
+        # dimensions indetical?
+        @test nrow(df_log1p) == nrow(df)
+        @test ncol(df_log1p) == ncol(df)
+
+        # returns copy?
+        @test P.prepare_predictors(df, specs) !== df
+
+        # no columns in specs: returns a copy of the same data frame
+        specs_no_reference = (log1p_predictors = Symbol[],)
+        @test P.prepare_predictors(df, specs_no_reference) isa DataFrame
+        @test P.prepare_predictors(df, specs_no_reference) == DataFrame(
+            fixed = 1:5,
+            variable = [1, 0, 22.5, 10000, ℯ - 1]
+        )
+
+        # error handling: missing values, negative values should throw error
+        df_error_missing = DataFrame(
+            fixed = 1:5,
+            variable = [1, missing , 22.5, 10000, ℯ - 1]
+        )
+        @test_throws MissingException P.prepare_predictors(df_error_missing, specs)
+        df_error_negative = DataFrame(
+            fixed = 1:5,
+            variable = [1, -2, 22.5, 10000, ℯ - 1]
+        )
+        @test_throws DomainError P.prepare_predictors(df_error_negative, specs)
+
+        # boundary: exactly -1 is invalid (log1p(-1) = -Inf), just above -1 is valid
+        @test_throws DomainError P.prepare_predictors(DataFrame(variable = [1.0, -1.0]), specs)
+        df_above = P.prepare_predictors(DataFrame(variable = [-0.5, 0.0]), specs)
+        @test df_above.variable ≈ [log(0.5), 0.0]
+    end
+
+        @testset "prepare_dependent" begin
+        df = DataFrame(price = [100.0, 200.0], x = [1.0, 2.0])
+
+        # log scale: new column log_<target>, original columns kept, input unchanged
+        data, dependent = P.prepare_dependent(df, (target = :price, log_scale = true))
+        @test dependent == :log_price
+        @test data.log_price ≈ log.([100.0, 200.0])
+        @test data.price == [100.0, 200.0]
+        @test ncol(data) == ncol(df) + 1
+        @test df == DataFrame(price = [100.0, 200.0], x = [1.0, 2.0])
+
+        # no log scale: an unchanged copy and the target itself as dependent variable
+        data_plain, dependent_plain = P.prepare_dependent(df, (target = :price, log_scale = false))
+        @test dependent_plain == :price
+        @test data_plain == df
+        @test data_plain !== df
+
+        # boundary: a small positive value works, 0 and negative values do not
+        @test P.prepare_dependent(DataFrame(price = [1e-10, 1.0]), (target = :price, log_scale = true))[2] == :log_price
+        @test_throws DomainError P.prepare_dependent(DataFrame(price = [100.0, 0.0]), (target = :price, log_scale = true))
+        @test_throws DomainError P.prepare_dependent(DataFrame(price = [100.0, -5.0]), (target = :price, log_scale = true))
+
+        # missing values
+        @test_throws MissingException P.prepare_dependent(DataFrame(price = [100.0, missing]), (target = :price, log_scale = true))
+    end
+
     @testset "regression_city / predict_apartment_performance / evaluate_regression" begin
-        # - prices that follow an exact log-linear rule are predicted exactly (rtol = 1e-6),
-        #   evaluate_regression gives r2 ≈ 1 and median_ae ≈ 0
-        # - a model with log_scale = false works and has smearing == 1.0
-        # - a log1p predictor works and the new DataFrame is not changed by the prediction
-        # - errors: a missing value in a used column, a target of 0 with log_scale = true
-        @test_broken false
+        # create test DataFrame and specification
+        df = DataFrame(accommodates = repeat(1:6, 10), reviews = repeat([0.0, 1.0, 5.0, 20.0, 60.0], 12))
+        df.price = exp.(1.0 .+ 0.3 .* df.accommodates)
+        spec = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:accommodates])
+
+        # test if model output following log-linear model are predicted exactly
+        fit = regression_city(df, spec)
+        @test predict_apartment_performance(fit, df) ≈ df.price rtol = 1e-6
+        score = evaluate_regression(fit, df)
+        @test score.n == 60
+        @test score.r2 ≈ 1 atol = 1e-6
+        @test score.r2_model_scale ≈ 1 atol = 1e-6
+        @test score.median_ae ≈ 0 atol = 1e-6
+
+        # a model on the original scale (prices that follow a linear rule) and has smearing
+        linear = DataFrame(accommodates = repeat(1:6, 10))
+        linear.price = 10.0 .+ 5.0 .* linear.accommodates
+        fit = regression_city(linear, merge(spec, (log_scale = false,)))
+        @test predict_apartment_performance(fit, linear) ≈ linear.price rtol = 1e-6
+        @test fit.smearing == 1.0                                       # only log models need the smearing factor
+
+        # a predictor that enters as log(1 + x); the new data is not changed by the prediction
+        df.price = exp.(1.0 .+ 0.3 .* log1p.(df.reviews))
+        spec = (target = :price, log_scale = true, log1p_predictors = [:reviews], predictors = [:reviews])
+        fit = regression_city(df, spec)
+        reviews_before = copy(df.reviews)
+        @test predict_apartment_performance(fit, df) ≈ df.price rtol = 1e-6
+        @test df.reviews == reviews_before
+
+        # imperfect fit on the original scale: values can be checked by hand
+        # x = 1:4, price = [2, 5, 6, 9] → OLS line price = 2.2x (intercept 0)
+        # predictions 2.2, 4.4, 6.6, 8.8 → absolute errors 0.2, 0.6, 0.6, 0.2
+        # SSE = 0.8, SST = 25 → R² = 1 - 0.8 / 25 = 0.968
+        noisy = DataFrame(x = [1.0, 2.0, 3.0, 4.0], price = [2.0, 5.0, 6.0, 9.0])
+        spec_noisy = (target = :price, log_scale = false, log1p_predictors = Symbol[], predictors = [:x])
+        fit_noisy = regression_city(noisy, spec_noisy)
+        score_noisy = evaluate_regression(fit_noisy, noisy)
+        @test score_noisy.n == 4
+        @test score_noisy.r2 ≈ 0.968 atol = 1e-8
+        @test score_noisy.r2_model_scale ≈ score_noisy.r2              # same scale without log
+        @test score_noisy.mae ≈ 0.4 atol = 1e-8
+        @test score_noisy.median_ae ≈ 0.4 atol = 1e-8
+
+        # imperfect fit on the log scale: R² below 1, both R² values differ, smearing > 1
+        noisy_log = DataFrame(x = [1.0, 2.0, 3.0, 4.0])
+        noisy_log.price = exp.(1.0 .+ 0.5 .* noisy_log.x) .* [1.1, 0.9, 1.05, 0.95]
+        spec_noisy_log = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x])
+        fit_noisy_log = regression_city(noisy_log, spec_noisy_log)
+        score_noisy_log = evaluate_regression(fit_noisy_log, noisy_log)
+        @test 0 < score_noisy_log.r2 < 1
+        @test 0 < score_noisy_log.r2_model_scale < 1
+        @test score_noisy_log.r2 != score_noisy_log.r2_model_scale
+        @test fit_noisy_log.smearing > 1.0                             # mean of exp(residuals) > 1 if residuals are not all 0
+
+        # a target <= 0 in the test set is an error for log models, but not for models on the original scale
+        test_zero = DataFrame(x = [1.0, 2.0], price = [3.0, 0.0])
+        @test_throws DomainError evaluate_regression(fit_noisy_log, test_zero)
+        @test evaluate_regression(fit_noisy, test_zero) isa NamedTuple
+
+        # missing values (GLM would drop those rows silently) and a target of 0 on the log scale are errors
+        with_missing = DataFrame(x = [1.0, 2.0, missing, 4.0], price = [1.0, 2.0, 3.0, 4.0])
+        @test_throws MissingException regression_city(with_missing, (target = :price, log_scale = false, log1p_predictors = Symbol[], predictors = [:x]))
+        no_log = DataFrame(x = [1.0, 2.0, 3.0], price = [1.0, 0.0, 3.0])
+        @test_throws DomainError regression_city(no_log, (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x]))
     end
  
+     @testset "get_r2" begin
+        
+        # real values vector
+        y1 = [1, 2, 3, 4]
+        y2 = [1, 2, 3]
+
+        # test with expected R-squared of 1
+        y_hat_1 = [1, 2, 3, 4]
+        @test P.get_r2(y1,y_hat_1) == 1
+
+        # R² is undefined for constant y.
+        y_hat_0 = [2.5, 2.5, 2.5, 2.5]
+        @test P.get_r2(y1,y_hat_0) == 0
+
+        # test sample with expected R-squared of 0.5       
+        y_hat_0_5 = [1, 2, 4]
+        @test P.get_r2(y2, y_hat_0_5) ≈ 0.5
+
+        # test sample with expected R-squared of -3 
+        y_hat_minus_3 = [3, 2, 1]
+        @test P.get_r2(y2, y_hat_minus_3) ≈ -3
+
+        # swapped arguments of the 0.5 case give a different R² (the argument order matters)
+        y3 = [1, 2, 4]
+        y_hat_3 = [1, 2, 3]
+        @test P.get_r2(y3, y_hat_3) ≈ 1 - 9/42
+
+        # test if function throws error for vectors with different lengths
+        @test_throws DimensionMismatch P.get_r2(y1,y2)
+        # test if function throws error for same values
+        @test_throws ArgumentError P.get_r2([5, 5, 5], [4, 5, 6]) 
+        # test if function throws error for empty y
+        @test_throws ArgumentError P.get_r2([],[]) 
+        # test if function throws error for missing values
+        y_hat = [4, missing, 2, 1]
+        @test_throws MissingException P.get_r2(y1,y_hat) 
+     end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------

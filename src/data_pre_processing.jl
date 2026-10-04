@@ -19,7 +19,7 @@ function filter_columns(df::DataFrame, relevant_columns::Vector{Symbol})
     # so missing_cols holds the wanted columns that the file does not have (empty if all exist)
 
     # 2. stop with a clear message if a column is missing
-    isempty(missing_cols) || error("filter_columns: colummns not found in data: $(join(missing_cols, ", "))")
+    isempty(missing_cols) || error("filter_columns: columns not found in data: $(join(missing_cols, ", "))")
     # isempty(x) is true if the list has no elements
     # cond || error(...) = the error only runs if the condition is false, i.e. if something is missing
     # $(...) puts a value into the text; join(list, ", ") turns the list into "a, b, c"
@@ -120,7 +120,39 @@ is multiplied by the rate for `currency`, an error is raised for unknown currenc
 Returns the modified DataFrame in place.
 """
 function convert_currency!(df::DataFrame, rules::NamedTuple, currency::String)
+    # 1. stop if the currency of the data has no exchange rate
+    haskey(rules.exchange_rates, currency) || error("convert_currency!: unknown currency: $currency")
+    # haskey checks if the currency (e.g. "USD") is one of the keys in the exchange rates
+    # if not, error(...) stops the function and names the unknown currency
+    
+    # 2. get the exchange rate and stop if it is zero or negative
+    rate = rules.exchange_rates[currency]
+    # the rate says how many EUR 1 unit of this currency is worth, e.g. 0.89 for USD
+    rate > 0 || error("convert_currency!: exchange rate for $currency must be positive, got $rate")
+    # a rate of 0 or below would give zero or negative amounts, so it is not allowed
+    
+    # 3. stop if a column from the rules does not exist in the table
+    missing_cols = setdiff(rules.columns, propertynames(df))
+    # setdiff keeps the columns from the rules that the table does not have
+    isempty(missing_cols) || error("convert_currency!: columns not found in data: $(join(missing_cols, ", "))")
+    # no missing column means we continue, otherwise the error names the missing columns
 
+    # 4. multiply every listed column by the rate into a new vector first, nothing is written yet
+    converted = Dict(col => df[!, col] .* rate for col in rules.columns)
+    # df[!, col] .* rate multiplies every value of the column by the rate (the dot means "for each value")
+    # missing values stay missing, because missing times a number is missing
+    # if a column contains text, this fails here and df is still unchanged
+
+    # 5. only now write the converted columns into the table
+    for (col, values) in converted
+        # go through every converted column: col is its name, values is the new vector
+        df[!, col] = values
+        # replace the old column with the converted one
+        # columns that are not listed in the rules are never touched
+    end
+    # 6. return the table
+    return df
+    # the same DataFrame object is returned, so the caller can chain functions in the pipeline
 end
 
 """
@@ -135,7 +167,39 @@ Convert the selected columns in `df` to the requested Julia types.
 Returns the modified DataFrame in place.
 """
 function set_types!(df::DataFrame, types::Dict{Symbol,DataType})
+    # 1. find the requested columns that do not exist in the table
+    missing_cols = setdiff(collect(keys(types)), propertynames(df))
+    # keys(types) are the column names we should convert, e.g. :price and :beds
+    # propertynames(df) are the columns that really exist in the table
+    # setdiff keeps only the names that are in the first list but not in the second
 
+    # 2. stop with a clear message before anything is changed
+    isempty(missing_cols) || error("set_types!: columns not found in data: $(join(missing_cols, ", "))")
+    # isempty(...) is true when no column is missing, then `||` skips the error and we continue
+    # otherwise error(...) stops the function and names the missing columns
+    # because this happens first, a typo in a column name never leaves a half-converted table
+
+    # 3. convert every listed column into a new vector first, nothing is written to the table yet
+    converted = Dict(col => Union{Missing,T}[convert_value(v, T) for v in df[!, col]] for (col, T) in types)
+    # for (col, T) in types: go through every listed column (col) with its target type (T)
+    # for v in df[!, col]: go through every single value (v) of that column
+    # convert_value(v, T): clean and convert one value ("$1,712.00" -> 1712.0, missing stays missing)
+    # Union{Missing,T}[...]: collect the results in a vector that may contain missing values
+    # col => ...: store the new vector under the column name in the dictionary `converted`
+    # if one value cannot be converted, convert_value throws an error here and df is still unchanged
+
+    # 4. only now write the converted columns into the table (so a failed conversion leaves df untouched)
+    for (col, values) in converted
+        # go through every converted column: col is its name, values is the new vector
+        
+        # 5. replace the old column with the converted one
+        df[!, col] = values
+        # df[!, col] selects the whole column; assigning to it swaps in the new vector
+        # columns that are not in `types` are never touched
+    end
+    # 6. return the table
+    return df
+    # the same DataFrame object is returned, so the caller can chain functions in the pipeline
 end
 
 """
@@ -150,7 +214,30 @@ Remove duplicate rows based on the columns specified in `check_columns`.
 Returns the modified DataFrame in place.
 """
 function remove_duplicates!(df::DataFrame, check_columns::Vector{Symbol})
+    # 1. stop if a column from check_columns does not exist in the table
+    missing_cols = setdiff(check_columns, propertynames(df))
+    # check_columns are the columns that identify a listing, e.g. [:id]
+    # propertynames(df) are the columns that really exist in the table
+    # setdiff keeps only the names that are in the first list but not in the second
 
+    # 2. stop with a clear message before anything is changed
+    isempty(missing_cols) || error("remove_duplicates!: columns not found in data: $(join(missing_cols, ", "))")
+    # isempty(...) is true when no column is missing, then `||` skips the error and we continue
+    # otherwise error(...) stops the function and names the missing columns
+    # because this happens first, a typo in a column name never changes the table
+
+    # 3. remove the repeated rows, comparing only the listed columns
+    unique!(df, check_columns)
+    # unique! goes through the rows from top to bottom and remembers the values of the check columns
+    # the first row with a new combination of values is kept, every later row with the same values is removed
+    # example: ids [1, 2, 1, 3, 2] become [1, 2, 3], the rows of the first 1 and the first 2 are kept
+    # only the check columns are compared, so two different listings with the same features (other columns) both stay
+    # with several check columns, a row is only a repeat if all of them are equal
+    # the ! at the end of unique! means that df itself is changed, no copy is made
+
+    # 4. return the table
+    return df
+    # the same DataFrame object is returned, so the caller can chain functions in the pipeline
 end
 
 """
@@ -204,13 +291,39 @@ Parse a bathroom description such as `"1.5 shared baths"` or `"Half-bath"`. Used
 Returns the numeric bathroom count, or `missing` if it cannot be parsed.
 """
 function parse_bathrooms(text)
+    # 1. a missing text cannot be read, so the answer is missing too
+    ismissing(text) && return missing
+    # cond && return x = return x only if the condition is true, otherwise go on to the next line
 
+    # 2. make everything lowercase so "Half-bath" and "half-bath" are treated the same
+    lower_text = lowercase(text)
+
+    # 3. a half bath has no number in the text, so it is handled first
+    if occursin("half", lower_text)
+        return 0.5
+    end
+    # occursin(a, b) = true if the word a is somewhere inside the text b
+
+    # 4. split the text into words and stop if there are none (e.g. an empty text "")
+    words = split(lower_text)
+    # split("1.5 shared baths") = ["1.5", "shared", "baths"], split cuts at the spaces
+    isempty(words) && return missing
+
+    # 5. the number is the first word, try to turn it into a number
+    number = tryparse(Float64, words[1])
+    # tryparse gives the number if the word is one ("1.5" gives 1.5), and nothing if it is not ("bathroom")
+    # parse would stop with an error for "bathroom", tryparse lets us decide what to do
+
+    # 6. no number found means missing, otherwise give back the number
+    isnothing(number) && return missing
+    return number
 end
 
 """
     impute_median_by_room_type!(df, col)
 
-Replace missing values in a column with the median value for the same room type.
+Replace missing values in a column with the median value for the same room type. A room type without any
+known value is left untouched, its missing values stay missing.
 
 # Arguments
 - `df::DataFrame`:  Input data frame.
@@ -219,13 +332,60 @@ Replace missing values in a column with the median value for the same room type.
 Returns the modified DataFrame in place.
 """
 function impute_median_by_room_type!(df::DataFrame, col::Symbol)
+    # 1. go through every room type that occurs in the table (e.g. "Private room", "Entire home/apt")
+    for room_type in unique(df.room_type)
+        # unique(list) = the list without repeated values, so every room type is handled once
+        # df.room_type is the room_type column, its name is fixed in the data
 
+        # 2. collect the known values of this room type
+        known = Float64[]
+        # an empty list that will hold the values of col that are not missing
+        for row in 1:nrow(df)
+            # 1:nrow(df) goes through every row number of the table
+            # isequal is used instead of == so that the check also works if a room type itself were missing
+            if isequal(df[row, :room_type], room_type) && !ismissing(df[row, col])
+                # && = both must be true: the row has this room type and its value is known
+                push!(known, df[row, col])
+                # push!(list, x) adds x at the end of the list
+            end
+        end
+
+        # 3. fill the empty cells, but only if there is at least one known value
+        if !isempty(known)
+            # !isempty(known) = the list has at least one value, the median of an empty list would fail
+            middle = median(known)
+            # median(list) = the middle value of the list (Statistics is already loaded in this file)
+            # the median is used instead of the mean, so one very big flat does not pull the value up
+            for row in 1:nrow(df)
+                if isequal(df[row, :room_type], room_type) && ismissing(df[row, col])
+                    df[row, col] = middle
+                    # writes the median into this one empty cell, df itself changes (the ! in the name)
+                end
+            end
+        end
+        # with no known value the cells stay missing and nothing breaks (the second line of the spec)
+    end
+
+    # 4. return the same table so the pipeline can keep working with it
+    return df
+    # the docstring promises the modified DataFrame
 end
 
 """
     process_missing!(df, rules)
 
-Apply the configured missing-value rules to each column in sequence.
+Apply the configured missing-value rules to each column in sequence. The rules are applied from top to bottom,
+so a later rule already sees the table changed by the earlier ones, and a column can appear more than once.
+
+- `:drop_row`:                          delete the rows where the column is missing.
+- `:fill_zero`:                         replace missing values with 0.
+- `:impute_median_by_room_type`:        replace missing values with the median of the same room type.
+- `:impute_median_or_drop_entire_home`: delete the missing rows of entire homes (`CONFIG.entire_home_label`),
+                                        fill the other room types with their median.
+- `:fill_from_bathrooms_text`:          fill missing values from the `bathrooms_text` column with `parse_bathrooms`,
+                                        delete the rows where no number is found ("0 baths" gives 0 and stays).
+
+An error is raised for an unknown rule.
 
 # Arguments
 - `df::DataFrame`:                      Input data frame.
@@ -235,20 +395,88 @@ Returns the modified DataFrame in place.
 """
 function process_missing!(df::DataFrame, rules::Vector{Pair{Symbol,Symbol}})
     for (col, rule) in rules
+        # rules comes from config.jl, e.g. :price => :drop_row, so no column names are written here
+        # (col, rule) splits each pair: col is the column name, rule says what to do with its empty cells
+        # the order matters, a later rule already sees the table changed by the earlier rules
         if rule == :drop_row
+            # 1. drop_row: delete every row where this column is empty
+            rows_to_delete = Int[]
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    # df[row, col] is one cell, ismissing(x) is true if the cell is empty
+                    push!(rows_to_delete, row)
+                    # push! adds the row number to the end of the list
+                end
+            end
+            deleteat!(df, rows_to_delete)
+            # deleteat! removes these rows from df itself (in place)
+            # the row numbers are collected first and deleted together at the end,
+            # deleting inside the loop would shift the row numbers and skip rows
+            # 1:nrow(df) goes from top to bottom, so the list is already sorted as deleteat! needs it
 
         elseif rule == :fill_zero
+            # 2. fill_zero: write 0 into every empty cell of this column
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    df[row, col] = 0
+                    # writes 0 into this one empty cell, df itself changes (the ! in the name)
+                end
+            end
+            # e.g. reviews_per_month: an empty cell means the listing got no reviews, so 0 is the true value
+            # the column holds Float64 numbers (set_types!), so Julia stores the 0 as 0.0 by itself
 
         elseif rule == :impute_median_by_room_type
+            # 3. impute_median_by_room_type: the helper fills the empty cells
+            impute_median_by_room_type!(df, col)
+            # the helper (#75) uses the median of the same room type, so this branch stays one line
+            # a room type without any known value stays missing, the helper does not crash there
 
         elseif rule == :impute_median_or_drop_entire_home
+            # 4. impute_median_or_drop_entire_home: delete empty entire homes, fill the other room types
+            rows_to_delete = Int[]
+            for row in 1:nrow(df)
+                if ismissing(df[row, col]) && isequal(df[row, :room_type], CONFIG.entire_home_label)
+                    push!(rows_to_delete, row)
+                end
+            end
+            # && = both must be true: the cell is empty and the listing is an entire home
+            # CONFIG.entire_home_label is "Entire home/apt" from config.jl, so a different city file only needs a config change
+            # isequal is used like in impute_median_by_room_type!, it also works if a room type itself were missing
+            deleteat!(df, rows_to_delete)
+            # deleteat! removes these rows from df itself, same as in drop_row
+            impute_median_by_room_type!(df, col)
+            # the remaining empty cells belong to other room types, the helper fills them with their median
+            # deleting first matters: if the helper ran first, it would also fill the entire homes
+            # e.g. most missing bedrooms are private rooms and 96% of them have 1 bedroom, entire homes vary too much
 
         elseif rule == :fill_from_bathrooms_text
+            # 5. fill_from_bathrooms_text: read the number from the bathroom text, then delete rows that still have none
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    df[row, col] = parse_bathrooms(df[row, :bathrooms_text])
+                end
+            end
+            # parse_bathrooms (#74) reads one text, e.g. "1.5 shared baths" gives 1.5 and "Half-bath" gives 0.5
+            # if the text has no number or is empty too, it gives missing back and the cell stays empty
+            # :bathrooms_text is written here because this rule is about exactly that column, its name says so
+            rows_to_delete = Int[]
+            for row in 1:nrow(df)
+                if ismissing(df[row, col])
+                    push!(rows_to_delete, row)
+                end
+            end
+            deleteat!(df, rows_to_delete)
+            # rows whose bathrooms are still empty cannot be guessed, so they are deleted like in drop_row
+            # "0 baths" gives 0.0 and is not deleted here, remove_if_zero! handles zeros later in the pipeline
 
         else
             error("Unknown missing value rule :$rule for column :$col")
         end
     end
+
+    # 6. return the table
+    return df
+    # the docstring promises the modified DataFrame, the stub did not return anything yet
 end
 
 """
@@ -449,6 +677,35 @@ Compute a distance feature relative to the configured city center.
 
 Returns the modified DataFrame in place.
 """
-function calculate_distance!(df::DataFrame, rules::NamedTuple, center::NamedTuple)
+function calculate_distance!(df::DataFrame, rule::NamedTuple, center::NamedTuple)
+# 1. get the latitude and longitude columns of the listings
+    lats = df[!, rule.source_columns.latitude]
+    lons = df[!, rule.source_columns.longitude]
+    # Assigns all rows in the column rule.source_columns.latitude/longitude from the df datafram to their respective variables 
+    # 2. convert all coordinates from degrees to radians
+    lats_rad = deg2rad.(lats)
+    longs_rad = deg2rad.(lons)
+    center_lat_rad = deg2rad(center.latitude)
+    center_lon_rad = deg2rad(center.longitude)
+    # Converts the coordinates of the individual listing locations and city center into radians (i.e.: sin, cos)
 
+    # 3. apply the haversine formula to get the distance in km
+    dlat = lats_rad .- center_lat_rad 
+    dlon = longs_rad .- center_lon_rad
+    a_part_lat = sin.(dlat./2).^2 
+    a_part_lon = cos.(lats_rad).*cos.(center_lat_rad).*sin.(dlon./2).^2
+    a = a_part_lat.+a_part_lon
+    c = 2 .*asin.(sqrt.(a))
+    earth_radius_km = 6371.0
+    distances = earth_radius_km .* c
+
+    # 4. store the distances as the new column
+    df[!, rule.target] = distances
+
+    # 5. delete the latitude and longitude columns if rule.delete is true
+    if rule.delete == true  
+        select!(df, Not(rule.source_columns.latitude))
+        select!(df, Not(rule.source_columns.longitude))
+    end
+    return df
 end
