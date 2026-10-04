@@ -541,7 +541,67 @@ const P = Project1
         # - an extreme low price is removed as well
         # - scale = :raw works
         # - errors: a value of 0 on the log scale, a missing value, an unknown method
-        @test_broken false
+        rules = (columns = [:price], method = :iqr, iqr_multiplier = 1.5, scale = :log, action = :drop_row)
+        # the same rule as in config.jl, but only for one column, so the tables can stay small
+
+        # 1. happy path: an extreme high price is removed, the normal prices stay
+        df = DataFrame(id = 1:10, price = [100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0, 180.0, 10000.0])
+        out = P.process_outliers!(df, rules)
+        @test df.price == [100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0, 180.0]
+        # only the 10000 row is gone, the 9 normal prices stay in their order
+        @test out === df
+        # === checks that the function returns the very same table, as promised in the docstring
+
+        # 2. nothing else changed: the other columns lose the same row and keep their values
+        @test df.id == 1:9
+        # the id column lost row 10 together with the price, the rows still match
+        @test df.price[1] == 100.0
+        # the values stay in euros, only the check used the log
+
+        # 3. happy path: an extreme low price is removed as well
+        df = DataFrame(price = [1.0, 100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0, 180.0])
+        P.process_outliers!(df, rules)
+        @test df.price == [100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0, 180.0]
+        # a price of 1 euro is too low, so it counts as an outlier too
+
+        # 4. edge case: no outliers, the table stays as it is
+        df = DataFrame(price = [100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0, 180.0])
+        P.process_outliers!(df, rules)
+        @test nrow(df) == 9
+        # all prices are close together, so nothing is removed
+
+        # 5. scale = :raw works
+        raw_rules = merge(rules, (scale = :raw,))
+        # merge makes a copy of rules where only scale is changed
+        df = DataFrame(price = [100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0, 180.0, 10000.0])
+        P.process_outliers!(df, raw_rules)
+        @test nrow(df) == 9
+        @test maximum(df.price) == 180.0
+        # without the log the 10000 row is removed as well
+
+        # 6. two columns: a row is removed if it is an outlier in at least one of them
+        two_rules = merge(rules, (columns = [:price, :estimated_revenue],))
+        df = DataFrame(id = 1:11,
+                       price = [100.0, 110.0, 120.0, 130.0, 140.0, 150.0, 160.0, 170.0, 180.0, 190.0, 10000.0],
+                       estimated_revenue = [1000.0, 1100.0, 1200.0, 1300.0, 5.0, 1500.0, 1600.0, 1700.0, 1800.0, 1900.0, 2000.0])
+        P.process_outliers!(df, two_rules)
+        @test df.id == [1, 2, 3, 4, 6, 7, 8, 9, 10]
+        # row 5 has a normal price but a tiny revenue, row 11 a normal revenue but a huge price: both go
+        # every column is judged on the full table first, then the two rows are removed together
+
+        # 7. error case: a value of 0 on the log scale
+        df = DataFrame(price = [0.0, 100.0, 110.0])
+        @test_throws ErrorException P.process_outliers!(df, rules)
+        # the log of 0 does not exist, so the function stops with a clear message
+
+        # 8. error case: a missing value
+        df = DataFrame(price = [100.0, missing, 110.0])
+        @test_throws ErrorException P.process_outliers!(df, rules)
+        # empty cells must be handled by process_missing! before this step
+
+        # 9. error case: an unknown method
+        @test_throws ErrorException P.process_outliers!(DataFrame(price = [100.0, 110.0]), merge(rules, (method = :zscore,)))
+        # only :iqr exists, any other method stops before anything is changed
     end
  
     @testset "format_dummies!" begin

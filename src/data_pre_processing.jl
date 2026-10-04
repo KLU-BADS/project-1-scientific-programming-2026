@@ -482,11 +482,17 @@ end
 """
     process_outliers!(df, rules)
 
-Remove rows whose values are outliers according to the configured IQR rule.
+Remove rows whose values are outliers according to the configured IQR rule. For every column in `rules.columns`
+the normal range is Q1 - `iqr_multiplier` * IQR up to Q3 + `iqr_multiplier` * IQR, where IQR = Q3 - Q1.
+A row is removed if it lies outside this range in at least one of the columns. Every column is judged on the
+full table first, then all flagged rows are removed together. With `scale = :log` the check uses the log of
+the values, the values in the table are not changed. An error is raised if a column has missing values,
+or values of 0 or below on the log scale.
 
 # Arguments
 - `df::DataFrame`:      Input data frame.
-- `rules::NamedTuple`:  Outlier configuration containing method, action, and scale.
+- `rules::NamedTuple`:  Outlier configuration containing the `columns` to check, `method` (:iqr),
+                        `iqr_multiplier`, `scale` (:raw or :log) and `action` (:drop_row).
 
 Returns the modified DataFrame in place.
 """
@@ -495,7 +501,67 @@ function process_outliers!(df::DataFrame, rules::NamedTuple)
     rules.action == :drop_row || error("Unknown outlier action :$(rules.action)")
     rules.scale in (:raw, :log) || error("Unknown outlier scale :$(rules.scale)")
 
+    # 1. make an empty list for the row numbers that will be deleted
+    rows_to_delete = Int[]
+    # Int[] is an empty list that can only hold whole numbers (row numbers)
+    # rows are only saved here and deleted at the very end (step 6)
 
+    # 2. check every column from the config one after another
+    for col in rules.columns
+        # rules.columns comes from config.jl, e.g. [:price, :estimated_revenue], so no names are written here
+        # df[!, col] is the whole column with that name
+
+        # 3. stop with a clear message if the column has empty cells
+        any(ismissing, df[!, col]) && error("process_outliers!: column :$col has a missing value")
+        # any(ismissing, x) is true if at least one value in x is missing
+        # cond && error(...) = the error only runs if the condition is true
+        # an empty cell cannot be compared with a number, process_missing! should have removed them before
+
+        # 4. copy the values and take the log if the config says so
+        numbers = Float64.(df[!, col])
+        # Float64.(x) turns every value into a decimal number and makes a copy, so the table itself is not changed
+        if rules.scale == :log
+            any(number -> number <= 0, numbers) && error("process_outliers!: column :$col has a value of 0 or below, log is not defined")
+            # number -> number <= 0 is a small function that checks one value, any(...) checks it for all values
+            # the log of 0 or of a negative number does not exist, so we stop before log would fail
+            numbers = log.(numbers)
+            # log. (with a dot) takes the log of every value in the list
+            # prices are very skewed (many cheap rooms, few very expensive homes), the log makes them more even,
+            # so only the truly odd listings are flagged; the euros in the table stay as they are
+        end
+
+        # 5. work out the normal range and save every row outside it
+        q1 = quantile(numbers, 0.25)
+        q3 = quantile(numbers, 0.75)
+        iqr = q3 - q1
+        # quantile(x, 0.25) is the value a quarter of the way up the sorted list (Q1), 0.75 three quarters up (Q3)
+        # the IQR is the distance between them, so the width of the middle half of the data
+        lower = q1 - rules.iqr_multiplier * iqr
+        upper = q3 + rules.iqr_multiplier * iqr
+        # the multiplier (1.5) comes from the config, a bigger number would remove fewer rows
+        # e.g. prices [100, 110, ..., 180, 10000] on the raw scale give Q1 = 122.5, Q3 = 167.5, IQR = 45,
+        # so the normal range is 55 to 235 and only the row with 10000 is outside
+        for row in 1:nrow(df)
+            if (numbers[row] < lower || numbers[row] > upper) && !(row in rows_to_delete)
+                push!(rows_to_delete, row)
+            end
+        end
+        # 1:nrow(df) goes through every row number; || means "or", so too low and too high both count
+        # !(row in rows_to_delete) makes sure a row flagged by both columns is saved only once
+        # push! adds the row number to the end of the list
+    end
+
+    # 6. delete all saved rows at once
+    sort!(rows_to_delete)
+    deleteat!(df, rows_to_delete)
+    # sort! puts the row numbers in order, because deleteat! needs them sorted
+    # deleteat! removes the rows from df itself (in place)
+    # deleting only now means every column was judged on the full table; deleting inside the loop
+    # would change Q1 and Q3 for the next column and shift the row numbers
+
+    # 7. return the table
+    return df
+    # the docstring promises the modified DataFrame, so the pipeline can continue with it
 end
 
 """
