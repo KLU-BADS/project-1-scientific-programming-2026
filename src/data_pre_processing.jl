@@ -385,7 +385,7 @@ function process_missing!(df::DataFrame, rules::Vector{Pair{Symbol,Symbol}})
                 end
             end
             # && = both must be true: the cell is empty and the listing is an entire home
-            # CONFIG.entire_home_label is "Entire home/apt" from config.jl, so the text is not written here (slide 40)
+            # CONFIG.entire_home_label is "Entire home/apt" from config.jl, so a different city file only needs a config change
             # isequal is used like in impute_median_by_room_type!, it also works if a room type itself were missing
             deleteat!(df, rows_to_delete)
             # deleteat! removes these rows from df itself, same as in drop_row
