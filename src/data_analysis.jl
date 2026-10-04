@@ -365,7 +365,8 @@ function get_r2(y::AbstractVector, y_hat::AbstractVector)
     # check for empty vectors
     isempty(y) && throw(ArgumentError("y and y_hat must not be empty"))
     # check for missing values
-    (any(ismissing, y) || any(ismissing, y_hat)) && throw(MissingException("y and y_hat have missing values"))
+    any(ismissing, y) && throw(MissingException("y has missing values"))
+    any(ismissing, y_hat) && throw(MissingException("y_hat has missing values"))
     # check if y is constant
     allequal(y) && throw(ArgumentError("R² is undefined for constant y (all values are $(first(y)))"))
     # return R-squared
