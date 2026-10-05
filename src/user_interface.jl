@@ -69,21 +69,19 @@ function ask_number(prompt::String, T::Type{<:Real}, min::Real, max::Real, inclu
 end
 
 """
-    ask_yes_no() -> Type{<:Real}
+    ask_yes_no(prompt; io_in = stdin, io_out = stdout) -> Union{Bool, Nothing}
 
-User interface in REPL allowing a select yes/no
+User interface in the REPL asking a yes/no question. Repeats the question until a valid answer is given.
 
 # Arguments
-- `prompt::String`:   Question shown to the user.
-- `io_in::IO`:        Input stream (default `stdin`); pass an `IOBuffer` in tests.
-- `io_out::IO`:       Output stream for the prompt (default `stdout`).
+- `prompt::AbstractString`:   Question shown to the user.
+- `io_in::IO`:                Input stream (default `stdin`); pass an `IOBuffer` in tests.
+- `io_out::IO`:               Output stream for the prompt and messages (default `stdout`).
 
-# Throws
-- `EOFError` if the input ends before a valid answer is given.
-
-Returns `true` for y/yes/t/true and `false` for n/no/f/false (case-insensitive).
+Returns `true` for y/yes/t/true and `false` for n/no/f/false (not case-sensitive), or `nothing` if the user
+enters `q`, `quit` or `exit` or the input ends before a valid answer is given.
 """
-function ask_yes_no(prompt::String; io_in::IO = stdin, io_out::IO = stdout)
+function ask_yes_no(prompt::AbstractString; io_in::IO = stdin, io_out::IO = stdout)
     yes_values = ("y", "yes", "t", "true")
     no_values = ("n", "no", "f", "false")
     # start with a value that is not accepted, so the loop runs at least once
@@ -96,9 +94,10 @@ function ask_yes_no(prompt::String; io_in::IO = stdin, io_out::IO = stdout)
         # ensure prompt appears before the program waits for input
         flush(io_out)
         # stop instead of looping forever if the input has ended
-        eof(io_in) && throw(EOFError())
+        eof(io_in) && return nothing
         # read line and normalize it (remove spaces/newline, lowercase)
         answer = lowercase(strip(readline(io_in)))
+        answer in ("q", "quit", "exit") && return nothing
     end
     # true for a yes-value, false for a no-value
     return answer in yes_values
