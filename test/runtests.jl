@@ -1015,6 +1015,17 @@ const P = Project1
                 # only columns can contain 0, a fixed number like 365 never does, so it is skipped
             end
         end
+
+        # 7. every dummy column is 0 or 1 and not constant
+        for rule in P.CONFIG.dummy_rules
+            # rule is one dummy of the config, e.g. has_pool; rule.target is the name of its column
+            @test all(in((0, 1)), df[!, rule.target])
+            # in((0, 1)) asks "is this value 0 or 1?", all(...) is true only if every value passes
+            @test length(unique(df[!, rule.target])) == 2
+            # unique keeps each different value once, so both 0 and 1 must appear
+            # a constant dummy (all 0 or all 1) cannot be estimated by the regression
+            # and often means a keyword never matches the amenity texts of this city
+        end
     end
  
     @testset "run_analysis_pipeline" begin
