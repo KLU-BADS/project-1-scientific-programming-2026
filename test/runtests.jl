@@ -955,12 +955,77 @@ const P = Project1
     # ------------------------------------------------------------------------------------------
  
     @testset "run_training_pipeline on the listings file" begin
-        # - enough rows are left (the sandbox checks > 5000, which fits the Barcelona file;
-        #   use a lower limit for a smaller city)
-        # - every target and predictor of P.CONFIG.regression_models exists and has no missing value
-        # - price and estimated_revenue are above 0
-        # - no ratio denominator is 0 and every ratio is finite
-        @test_broken false
+        # This test set runs the complete cleaning pipeline on the real file of the city in the config
+        # It checks that the finished table is good enough to fit the regression models
+
+        # 1. run the whole training pipeline once on the file of the city in the config
+        df = P.run_training_pipeline()
+        # df is the cleaned table; all checks below use it, so the pipeline runs only once and every check sees the same result
+
+        # 2. enough rows are left after cleaning
+        raw_rows = nrow(P.import_csv(P.CONFIG.filepath))
+        # reads the raw file of the city in the config again and counts its rows
+        @test nrow(df) > 0.3 * raw_rows
+        # the cleaning removes duplicates, zeros and outliers; at least 30% of the listings must survive
+        # because a relative limit fits any city, big or small
+        @test nrow(df) > 1000
+        # an absolute floor: with about 25 coefficients and an 80/20 split this leaves roughly 800 training and 200 test rows
+        # a very small city can fail this on purpose, then its scores are not reliable and the limit has to be reconsidered
+
+        # 3. collect every column the models use (targets and predictors), without repeats
+        model_columns = Symbol[]
+        # an empty list for the column names, it can only hold Symbols
+        for spec in P.CONFIG.regression_models
+            # spec is one model of the config, e.g. the price model
+            append!(model_columns, vcat(spec.target, spec.predictors))
+            # spec.target is one name, spec.predictors is a list of names
+            # vcat puts both into one list, append! adds this list to model_columns
+        end
+        model_columns = unique(model_columns)
+        # unique removes repeats, because both models use many of the same predictors
+
+        # 4. every model column exists and has no missing value
+        for column in model_columns
+            # checks one column after another; column is the name of the current one
+            @test column in propertynames(df)
+            # propertynames(df) = all column names of df, so the column must be in the table
+            column in propertynames(df) && @test !any(ismissing, df[!, column])
+            # any(ismissing, x) is true if one value is missing, ! turns it around: no missing value allowed
+            # the && skips this check if the column does not exist, so one missing column does not stop the whole test set
+        end
+
+        # 5. price and estimated_revenue are above 0
+        @test all(df.price .> 0)
+        # .> compares every value with 0, all(...) is true only if every single comparison is true
+        # a price of 0 would break the log scale of the model
+        @test all(df.estimated_revenue .> 0)
+        # the same check for the second dependent variable
+
+        # 6. every ratio is finite and no denominator column contains 0
+        for rule in P.CONFIG.ratio_rules
+            # rule is one ratio of the config, e.g. beds divided by bedrooms
+            # rule.target is the name of the new ratio column, rule.denominator is what is divided by
+            @test all(isfinite, df[!, rule.target])
+            # isfinite is false for Inf (division by 0) and NaN, so the ratio column must contain real numbers only
+            # NaN means "Not a Number", e.g. the result of 0 / 0; Inf is the result of dividing by 0
+            if rule.denominator isa Symbol
+                # the denominator is either a column name or a fixed number (365), only columns can contain 0
+                @test all(!iszero, df[!, rule.denominator])
+                # iszero(x) is true for 0, ! turns it around, so no value of the denominator column may be 0
+                # only columns can contain 0, a fixed number like 365 never does, so it is skipped
+            end
+        end
+
+        # 7. every dummy column is 0 or 1 and not constant
+        for rule in P.CONFIG.dummy_rules
+            # rule is one dummy of the config, e.g. has_pool; rule.target is the name of its column
+            @test all(in((0, 1)), df[!, rule.target])
+            # in((0, 1)) asks "is this value 0 or 1?", all(...) is true only if every value passes
+            @test length(unique(df[!, rule.target])) == 2
+            # unique keeps each different value once, so both 0 and 1 must appear
+            # a constant dummy (all 0 or all 1) cannot be estimated by the regression
+            # and often means a keyword never matches the amenity texts of this city
+        end
     end
  
     @testset "run_analysis_pipeline" begin
