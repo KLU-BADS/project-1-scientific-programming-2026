@@ -24,6 +24,9 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
     denominators = unique(Symbol[rule.denominator for rule in CONFIG.ratio_rules if rule.denominator isa Symbol])
     remove_if_zero!(df, denominators)
     process_outliers!(df, CONFIG.outlier_rules)
+    remove_implausible!(df, CONFIG.plausibility_rules)
+    caps = compute_caps(df, CONFIG.cap_rules)
+    cap_values!(df, caps, CONFIG.cap_rules)
     for rule in CONFIG.dummy_rules
         format_dummies!(df, rule)
     end
@@ -31,7 +34,14 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
         calculate_ratio!(df, rule)
     end
     calculate_distance!(df, CONFIG.distance_rule, CONFIG.cities[CONFIG.city].center)
-    return df
+    kept = kept_categories(df, CONFIG.category_rule)
+    group_rare_categories!(df, CONFIG.category_rule, kept)
+    centers = Dict{Symbol,Float64}()
+    for rule in CONFIG.square_rules
+        centers[rule.source] = square_center(df, rule)
+        calculate_square!(df, rule, centers[rule.source])
+    end
+    return (df = df, fitted = (caps = caps, kept_districts = kept, square_centers = centers))
 end
 
 """
