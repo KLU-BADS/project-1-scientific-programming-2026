@@ -67,3 +67,39 @@ function ask_number(prompt::String, T::Type{<:Real}, min::Real, max::Real, inclu
     end
     return num
 end
+
+"""
+    ask_yes_no() -> Type{<:Real}
+
+User interface in REPL allowing a select yes/no
+
+# Arguments
+- `prompt::String`:   Question shown to the user.
+- `io_in::IO`:        Input stream (default `stdin`); pass an `IOBuffer` in tests.
+- `io_out::IO`:       Output stream for the prompt (default `stdout`).
+
+# Throws
+- `EOFError` if the input ends before a valid answer is given.
+
+Returns `true` for y/yes/t/true and `false` for n/no/f/false (case-insensitive).
+"""
+function ask_yes_no(prompt::String; io_in::IO = stdin, io_out::IO = stdout)
+    yes_values = ("y", "yes", "t", "true")
+    no_values = ("n", "no", "f", "false")
+    # start with a value that is not accepted, so the loop runs at least once
+    answer = ""
+    while !(answer in yes_values || answer in no_values)
+        # show a hint after an invalid answer (not before the first one)
+        answer == "" || println(io_out, "Please answer y or n.")
+        # write prompt to terminal
+        print(io_out, prompt)
+        # ensure prompt appears before the program waits for input
+        flush(io_out)
+        # stop instead of looping forever if the input has ended
+        eof(io_in) && throw(EOFError())
+        # read line and normalize it (remove spaces/newline, lowercase)
+        answer = lowercase(strip(readline(io_in)))
+    end
+    # true for a yes-value, false for a no-value
+    return answer in yes_values
+end
