@@ -28,3 +28,42 @@ function ask_choice(title::String, options::Vector{String}; io_in::IO = stdin, i
     # Radio Menu
     RadioMenu(options; pagesize=-1, charset=:unicode, keybindings=Char[])
 end
+
+
+"""
+    ask_number() -> Type{<:Real}
+
+User interface in REPL allowing a user to enter a number and returns the number in the correct type.
+
+# Arguments
+- `prompt::String`:     Prompt to user.
+- `T::Type{<:Real}`:    Input data type for parsing.
+- `min<:Real`:          Lower boundary of input interval.
+- `max<:Real`:          Upper boundary of input interval.
+- `inclusive_interval`::Bool = false: If true then min and max are smaller/greater THAN, if false smaller/greater
+
+
+Returns `number` of type `T` with the users choices (empty if user cancels input).
+"""
+function ask_number(prompt::String, T::Type{<:Real}, min::Real, max::Real, inclusive_interval::Bool = false; io_in::IO = stdin, io_out::IO = stdout)
+    valid = false
+    num::Real
+    while !valid
+        # write prompt to terminal
+        print(io_out, prompt)
+        # ensure prompt appears before program waits for input
+        flush(io_out)
+        # Read line
+        eof(io_in) && return nothing
+        s = strip(readline(io_in))
+        # remove white spaces
+        s = strip(s)
+        # Parse number
+        num = tryparse(T,s)
+        # check validity of input
+        isnothing(num) && (print("Not a valid input!"; continue))
+        # Check range (maybe implement ranges in CONFIG?!)
+        valid = inclusive_interval ? (min <= num <= max) : (min < num < max)
+    end
+    return num
+end
