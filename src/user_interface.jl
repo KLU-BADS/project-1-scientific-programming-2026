@@ -52,10 +52,10 @@ Returns the entered number as type `T`, or `nothing` if the user enters `q`, `qu
 # Examples
 
 ```jldoctest
-julia> ask_number("Guests: ", Int, 1, 16, true; io_in = IOBuffer("4\n"), io_out = IOBuffer())
+julia> Project1.ask_number("Guests: ", Int, 1, 16, true; io_in = IOBuffer("4\\n"), io_out = IOBuffer())
 4
 
-julia> ask_number("Guests: ", Int, 1, 16, true; io_in = IOBuffer("q\n"), io_out = IOBuffer()) === nothing
+julia> Project1.ask_number("Guests: ", Int, 1, 16, true; io_in = IOBuffer("q\\n"), io_out = IOBuffer()) === nothing
 true
 ```
 """
