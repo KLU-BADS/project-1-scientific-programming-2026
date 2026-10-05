@@ -1,3 +1,5 @@
+using REPL.TerminalMenus
+
 """
     gui()
 
@@ -31,39 +33,58 @@ end
 
 
 """
-    ask_number() -> Type{<:Real}
+    ask_number(prompt, T, min_val = -Inf, max_val = Inf, inclusive_interval = false; io_in = stdin, io_out = stdout) -> Union{T, Nothing}
 
-User interface in REPL allowing a user to enter a number and returns the number in the correct type.
+User interface in the REPL allowing a user to enter a number. Repeats the question until a valid number in the
+permitted range is entered.
 
 # Arguments
-- `prompt::String`:     Prompt to user.
-- `T::Type{<:Real}`:    Input data type for parsing.
-- `min<:Real`:          Lower boundary of input interval.
-- `max<:Real`:          Upper boundary of input interval.
-- `inclusive_interval`::Bool = false: If true then min and max are smaller/greater THAN, if false smaller/greater
+- `prompt::AbstractString`:     Prompt shown to the user.
+- `T::Type{<:Real}`:            Type the input is parsed to, e.g. `Int` or `Float64`.
+- `min_val::Real`:              Lower boundary of the allowed interval (default `-Inf`, no lower boundary).
+- `max_val::Real`:              Upper boundary of the allowed interval (default `Inf`, no upper boundary).
+- `inclusive_interval::Bool`:   If `true`, `min_val` and `max_val` themselves are allowed (`min_val <= x <= max_val`);
+                                if `false` (default), they are not (`min_val < x < max_val`).
+- `io_in::IO`:                  Input stream (default `stdin`); pass an `IOBuffer` in tests.
+- `io_out::IO`:                 Output stream for the prompt and messages (default `stdout`).
 
+Returns the entered number as type `T`, or `nothing` if the user enters `q`, `quit` or `exit`
+(not case-sensitive) or the input ends before a valid number is given.
 
-Returns `number` of type `T` with the users choices (empty if user cancels input).
+# Examples
+
+```jldoctest
+julia> ask_number("Guests: ", Int, 1, 16, true; io_in = IOBuffer("4\n"), io_out = IOBuffer())
+4
+
+julia> ask_number("Guests: ", Int, 1, 16, true; io_in = IOBuffer("q\n"), io_out = IOBuffer()) === nothing
+true
+```
 """
-function ask_number(prompt::String, T::Type{<:Real}, min::Real, max::Real, inclusive_interval::Bool = false; io_in::IO = stdin, io_out::IO = stdout)
-    valid = false
-    num::Real
-    while !valid
+function ask_number(prompt::AbstractString, T::Type{<:Real}, min_val::Real = -Inf, max_val::Real = Inf, inclusive_interval::Bool = false; io_in::IO = stdin, io_out::IO = stdout)
+    while true
         # write prompt to terminal
         print(io_out, prompt)
         # ensure prompt appears before program waits for input
         flush(io_out)
-        # Read line
+        # stop if the input has ended
         eof(io_in) && return nothing
-        s = strip(readline(io_in))
-        # remove white spaces
-        s = strip(s)
-        # Parse number
-        num = tryparse(T,s)
-        # check validity of input
-        isnothing(num) && (println(io_out, "Not a valid input!"); continue)
-        # Check range (maybe implement ranges in CONFIG?!)
-        valid = inclusive_interval ? (min <= num <= max) : (min < num < max)
+        # read line, remove white spaces and parse number
+        input = strip(readline(io_in))
+        lowercase(input) in ("q", "quit", "exit") && return nothing
+        num = tryparse(T, input)
+        # not a number: ask again
+        if isnothing(num)
+            if T <: Integer
+                println(io_out, "Not a valid input, enter a whole number!")
+            else
+                println(io_out, "Not a valid input, enter a number!")
+            end
+            continue
+        end
+        # check range
+        in_range = inclusive_interval ? (num >= min_val && num <= max_val) : (num > min_val && num < max_val)
+        in_range && return num
+        println(io_out, "Please enter a number between $(min_val) and $(max_val).")
     end
-    return num
 end
