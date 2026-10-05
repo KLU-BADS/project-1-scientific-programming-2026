@@ -709,3 +709,34 @@ function calculate_distance!(df::DataFrame, rule::NamedTuple, center::NamedTuple
     end
     return df
 end
+
+function kept_categories(df::DataFrame, rule::NamedTuple)
+    # 1. count the rows per category of the column named in the rule
+    grouped = groupby(df, rule.column)
+    counts = combine(grouped, nrow => :count)
+    # 2. keep only the categories with at least rule.min_count rows
+    kept_rows = counts[counts.count .>= rule.min_count, :]
+    # 3. return their names as a list
+    return String.(kept_rows[!, rule.column])
+end
+
+function group_rare_categories!(df::DataFrame, rule::NamedTuple, kept::Vector{String})
+    # 1. get the category column named in the rule
+    categories = df[!, rule.column]
+    # 2. for every value: keep it if it is in kept, otherwise replace it with rule.other_label
+    new_values = String[]
+
+    for cat in categories
+        if cat in kept
+            push!(new_values, cat)
+        else
+            push!(new_values, rule.other_label)
+        end
+    end
+    # creates a new list to which either the actual district name $cat is added, or the rule other label (just adds "_Other")
+    # 3. store the new values back in the column
+    df[!, rule.column] = new_values
+    # Assigns elements of new values to the dataframe for all rows in the rule column(s)
+    # 4. give the table back
+    return df
+end 
