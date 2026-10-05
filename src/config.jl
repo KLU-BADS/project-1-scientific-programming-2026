@@ -13,6 +13,25 @@ const PROJECT_ROOT = normpath(joinpath(@__DIR__, ".."))
 # Change it here to switch cities: it picks both the data file and the entry in `cities`.
 const CITY = "Athens"
 
+# Predictor groups of the regression models. They are separate constants for the same reason
+# as CITY: a NamedTuple cannot refer to its own fields, so regression_models below cannot be
+# built from other CONFIG fields.
+
+# Amenity dummies created by format_dummies!()
+const AMENITIES = [:has_balcony, :has_AC, :allows_pets, :has_kitchen,
+    :has_pool, :has_tv, :has_kettle, :has_washer, :has_dishwasher,
+    :has_elevator, :has_self_checkin]
+
+# Sizes, location, minimum stay and host flag; used by all three models
+const SIZE_LOCATION = [:room_type, :district, :accommodates, :accommodates_sq,
+    :bedrooms, :beds, :bathrooms, :proximity_city_center,
+    :minimum_nights, :is_superhost]
+
+# The six rating sub-scores; used by the :price_explain model only
+const SUBSCORES = [:review_scores_accuracy, :review_scores_cleanliness,
+    :review_scores_checkin, :review_scores_communication,
+    :review_scores_location, :review_scores_value]
+
 # Configuration for data input, data pre-processing, and the regression model.
 # Based on the variable proposal in the regression model overview.
 #
@@ -20,7 +39,7 @@ const CITY = "Athens"
 # (see label_mapping). Everything before format_labels!() (relevant_columns, label_mapping keys)
 # uses the RAW names from listings.csv.
 const CONFIG = (
-    # Filepath for the import fuction for the listings.csv data file located in data/raw
+    # Filepath for the import function: the <city>_listings.csv data file of CITY, located in data/raw
     filepath = joinpath(PROJECT_ROOT, "data", "raw", lowercase(CITY) * "_listings.csv"),
     city = CITY,                            # key into `cities`, selects the city center for calculate_distance!()
 
@@ -28,12 +47,19 @@ const CONFIG = (
     relevant_columns = [
         :id,                                # only used to remove duplicates
         :room_type, :accommodates,          # basic facts
-        :beds, :bedrooms, :bathrooms, :bathrooms_text,   # -> ratios (bathrooms_text fills missing bathrooms)
+        :beds, :bedrooms, :bathrooms, :bathrooms_text,   # sizes (bathrooms_text fills missing bathrooms)
         :latitude, :longitude,              # -> proximity_city_center
+        :neighbourhood_cleansed,            # -> district
         :amenities,                         # -> has_balcony, has_AC, allows_pets
+        :minimum_nights,                    # -> log1p predictor of every model
         :estimated_occupancy_l365d, :availability_365,   # -> occupancy_rate, ratio_occupancy_availability
-        :host_is_superhost,
+        :host_is_superhost,                 # -> is_superhost
+        # review_scores_rating is a predictor; number_of_reviews and reviews_per_month are kept
+        # for process_missing!() but no model uses them any more
         :review_scores_rating, :number_of_reviews, :reviews_per_month,
+        :review_scores_accuracy, :review_scores_cleanliness,   # NEW
+        :review_scores_checkin, :review_scores_communication,  # NEW
+        :review_scores_location, :review_scores_value,         # NEW
         :price, :estimated_revenue_l365d,   # dependent variables
     ],
 
@@ -43,19 +69,33 @@ const CONFIG = (
         :host_is_superhost            => :is_superhost,
         :number_of_reviews            => :number_ratings,
         :estimated_revenue_l365d      => :estimated_revenue,
+        :neighbourhood_cleansed       => :district,
     ),
 
     # Configuration for set_types!(): columns that need a type other than the one CSV.read infers.
     # Price is a String, e.g., "$409.00"; the rest are Float64 to avoid type errors.
     column_types = Dict{Symbol,DataType}(
-        :price             => Float64,
-        :estimated_revenue => Float64,
-        :beds              => Float64,
-        :bedrooms          => Float64,
-        :bathrooms         => Float64,
+        :price                          => Float64,
+        :estimated_revenue              => Float64,
+        :beds                           => Float64,
+        :bedrooms                       => Float64,
+        :bathrooms                      => Float64,
+        :minimum_nights                 => Float64,
+        :review_scores_accuracy         => Float64,
+        :review_scores_cleanliness      => Float64,
+        :review_scores_checkin          => Float64,
+        :review_scores_communication    => Float64,
+        :review_scores_location         => Float64,
+        :review_scores_value            => Float64,
     ),
 
     # Configuration for convert_currency!(): every amount is converted to base_currency
+    #
+    # rules:
+    # columns         columns holding the amounts that are converted
+    # base_currency   currency every amount is converted to; only a label, the conversion
+    #                 itself just multiplies by the rate of the city's currency
+    # exchange_rates  rate per currency code; the key used is the currency of CITY (see `cities`)
     currency_rules = (
         columns = [:price, :estimated_revenue],
         base_currency = "EUR",
@@ -86,15 +126,37 @@ const CONFIG = (
     #                                     (most missing bedrooms/beds are private rooms, 96% of them have 1 bedroom)
     # :fill_from_bathrooms_text            parse the number from bathrooms_text, e.g. "1.5 shared baths" -> 1.5, "Half-bath" -> 0.5
     missing_rules = Pair{Symbol,Symbol}[
-        :price                => :drop_row,
-        :estimated_revenue    => :drop_row,
-        :is_superhost         => :drop_row,
-        :review_scores_rating => :drop_row,     # listings without any review cannot be rated
-        :reviews_per_month    => :fill_zero,
-        :bedrooms             => :impute_median_or_drop_entire_home,
-        :beds                 => :impute_median_or_drop_entire_home,
-        :bathrooms            => :fill_from_bathrooms_text,
+        :price                          => :drop_row,
+        :estimated_revenue              => :drop_row,
+        :is_superhost                   => :drop_row,
+        :review_scores_rating           => :drop_row,     # listings without any review cannot be rated
+        :reviews_per_month              => :fill_zero,
+        :bedrooms                       => :impute_median_or_drop_entire_home,
+        :beds                           => :impute_median_or_drop_entire_home,
+        :bathrooms                      => :fill_from_bathrooms_text,
+        :minimum_nights                 => :drop_row,
+        :review_scores_accuracy         => :drop_row,
+        :review_scores_cleanliness      => :drop_row,
+        :review_scores_checkin          => :drop_row,
+        :review_scores_communication    => :drop_row,
+        :review_scores_location         => :drop_row,
+        :review_scores_value            => :drop_row,
     ],
+
+    # Configuration for remove_implausible!()
+    # rows breaking a rule are removed in training; the input uses the same limits
+    #
+    # rule: column <= factor * max_of + offset
+    plausibility_rules = [
+        (column = :bedrooms,  max_of = :accommodates, factor = 1.0, offset = 0.0),
+        (column = :bathrooms, max_of = :bedrooms,     factor = 1.0, offset = 2.0),
+        (column = :beds,      max_of = :accommodates, factor = 2.0, offset = 0.0),
+    ],
+
+    # Configuration for compute_caps() and cap_values!()
+    # sizes above the 99.5th percentile of their room type are capped
+    cap_rules = (columns = [:accommodates, :bedrooms, :beds, :bathrooms],
+                 group_by = :room_type, quantile = 0.995),
 
     # Configuration for process_outliers!():
     # Function uses the IQR (interquartile range) method to identify outliers.
@@ -135,6 +197,7 @@ const CONFIG = (
         (source = :amenities,     target = :has_dishwasher, keywords = ["\"dishwasher\""],            delete = false),
         (source = :amenities,     target = :has_elevator, keywords = ["\"elevator\""],                delete = false),
         (source = :amenities,     target = :has_self_checkin, keywords = ["self check-in"],           delete = false),
+        # source and target are the same column: the "t"/"f" flag is replaced by 1/0 in place
         (source = :is_superhost,  target = :is_superhost, keywords = ["t"],                           delete = false),
     ],
 
@@ -148,28 +211,38 @@ const CONFIG = (
     # denominator     ratio denominator
     # delete          optional flag to delete column after ratio calculation
     ratio_rules = [
-        (target = :ratio_beds_bedrooms,             numerator = :beds,                      denominator = :bedrooms,          delete = false),
-        (target = :ratio_accommodates_to_bathrooms, numerator = :accommodates,            denominator = :bathrooms,         delete = false),
         (target = :occupancy_rate,                  numerator = :estimated_occupancy_l365d, denominator = 365,                delete = false),
         (target = :ratio_occupancy_availability,    numerator = :estimated_occupancy_l365d, denominator = :availability_365,  delete = false),
     ],
+
     # Configuration for calculate_distance!(): distance of each listing to the city center of `city`.
     # Expansion to other distance calculations (e.g., major tourist attractions) is possible.
     #
     # rules:
     # target          distance of apartment to city center
-    # source_column   reference to columns containing latitude and longitude of apartment
-    # delete          optional flag to delete column after ratio calculation
-    #
-    # cities:
-    # center          latitude and longitude of city center
-    # currency        currency used in listings.csv city file
+    # source_columns  references to the columns holding latitude and longitude of the apartment
+    # delete          optional flag to delete the latitude and longitude columns after the calculation
+    #                 (false here: the coordinates are still needed to derive a user's district)
     distance_rule = (
         target = :proximity_city_center,
         source_columns = (latitude = :latitude, longitude = :longitude),
-        delete = true,
+        delete = false,
     ),
 
+    # Configuration for kept_categories() and group_rare_categories!()
+    # districts with fewer than 20 listings are merged
+    category_rule = (column = :district, min_count = 20, other_label = "_other"),
+
+    # Configuration for square_center() and calculate_square!()
+    # centred squares
+    square_rules = [
+        (source = :accommodates,         target = :accommodates_sq, center = true),
+        (source = :review_scores_rating, target = :rating_sq,       center = true),
+    ],
+
+    # Known cities, keyed by the value of CITY:
+    # center          latitude and longitude of the city center, used by calculate_distance!()
+    # currency        currency of that city's listings file, selects the rate in currency_rules
     cities = Dict(
         "Athens"    => (center = (latitude = 37.9838, longitude = 23.7275), currency = "USD"),
         "Barcelona" => (center = (latitude = 41.3851, longitude = 2.1734), currency = "USD"),
@@ -183,44 +256,117 @@ const CONFIG = (
 
     # Configuration for regression_city(): one linear model per entry.
     #
+    # rules:
+    # name              identifies the model; code looks a fit up by name, not by position
+    # target            dependent variable of the model
+    # log_scale         fit on log(target) and transform the predictions back
+    # log1p_predictors  predictors that enter the model as log(1 + x)
+    # predictors        independent variables of the model
+    #
     # log_scale = true: the model is fitted on log(target) and its predictions are transformed back
     # (price and revenue are strongly right-skewed; on the log scale the fit is better and the errors are proportional).
-    # log1p_predictors: heavy-tailed predictors (e.g. up to 100 reviews per month) that enter the model as log(1 + x).
-    # Revenue is calculated as price x estimated occupancy (100% of the rows), and the occupancy is itself an estimate based on
-    # reviews. The revenue model therefore does not use the occupancy and review volume predictors, otherwise its R2 would
-    # mostly reflect this calculation.
+    # log1p_predictors: heavy-tailed predictors, here the minimum nights per stay, that enter as log(1 + x).
+    #
+    # the three models:
+    # :price             the only model used for a prediction shown to a user
+    # :price_explain     the six rating sub-scores instead of the overall rating and its square;
+    #                    for the findings and the rating tips only, never for a user's price
+    # :revenue_baseline  for the report only. Revenue itself is calculated as predicted price x booked
+    #                    nights, because estimated_revenue is price x estimated occupancy in the raw data.
     regression_models = [
-        (
-            target = :price,
-            log_scale = true,
-            log1p_predictors = [:reviews_per_month, :number_ratings, :ratio_occupancy_availability],
-            predictors = [
-                :room_type, :accommodates,                                     # basic facts
-                :ratio_beds_bedrooms, :ratio_accommodates_to_bathrooms,        # basic ratios
-                :proximity_city_center,                  # location
-                :has_balcony, :has_AC, :allows_pets,                           # amenities
-                :has_kitchen, :has_pool, :has_tv, :has_kettle, :has_washer,
-                :has_dishwasher, :has_elevator, :has_self_checkin,
-                :occupancy_rate, :ratio_occupancy_availability,                # occupancy
-                :is_superhost,                                                 # host
-                :review_scores_rating, :number_ratings, :reviews_per_month,    # ratings
-            ],
-        ),
-        (
-            target = :estimated_revenue,
-            log_scale = true,
-            log1p_predictors = Symbol[],
-            predictors = [
-                :room_type, :accommodates,
-                :ratio_beds_bedrooms, :ratio_accommodates_to_bathrooms,
-                :proximity_city_center,
-                :has_balcony, :has_AC, :allows_pets,
-                :has_kitchen, :has_pool, :has_tv, :has_kettle, :has_washer,
-                :has_dishwasher, :has_elevator, :has_self_checkin,
-                :is_superhost,
-                :review_scores_rating,
-            ],
-        ),
+        (name = :price, target = :price, log_scale = true,
+        log1p_predictors = [:minimum_nights],
+        predictors = vcat(SIZE_LOCATION, [:review_scores_rating, :rating_sq], AMENITIES)),
+
+        (name = :price_explain, target = :price, log_scale = true,
+        log1p_predictors = [:minimum_nights],
+        predictors = vcat(SIZE_LOCATION, SUBSCORES, AMENITIES)),
+
+        (name = :revenue_baseline, target = :estimated_revenue, log_scale = true,
+        log1p_predictors = [:minimum_nights],
+        predictors = vcat(SIZE_LOCATION, [:review_scores_rating, :rating_sq], AMENITIES)),
     ],
 
+    # reference category per text predictor (:most_common = most listings)
+    reference_levels = Dict(:room_type => :most_common, :district => :most_common),
+
+    interval_level      = 0.8,   # share of comparable apartments in the price range
+    significance_level  = 0.05,  # p-value limit for tips and findings
+    min_effect_pct      = 1.0,   # smallest amenity effect worth a tip, in %
+    min_room_type_count = 30,    # rarer room types are not offered or plotted
+
+    # occupancy of comparable listings: revenue of new apartments, "high occupancy"
+    occupancy_rule = (group_by = [:district, :room_type], min_count = 20,
+                    fallback = :room_type, high_quantile = 0.5),
+
+    # amenities a host can add; :has_kitchen is still for the team to decide
+    actionable_amenities = [:has_AC, :has_tv, :has_kettle, :has_washer,
+                            :has_dishwasher, :has_self_checkin, :allows_pets],
+
+    # rating tips from :price_explain, effect per 0.1 point
+    rating_tips = (columns = [:review_scores_cleanliness, :review_scores_accuracy],
+                step = 0.1),
+
+    # groups for the importance chart in the findings
+    importance_groups = [
+        "Size"           => [:accommodates, :accommodates_sq, :bedrooms, :beds, :bathrooms],
+        "Location"       => [:district, :proximity_city_center],
+        "Minimum nights" => [:minimum_nights],
+        "Room type"      => [:room_type],
+        "Amenities"      => AMENITIES,
+        "Rating"         => [:review_scores_rating, :rating_sq],
+        "Superhost"      => [:is_superhost],
+    ],
+
+    # menu text for every amenity
+    amenity_labels = Dict(
+        :has_balcony => "Balcony", :has_AC => "Air conditioning",
+        :allows_pets => "Pets allowed", :has_kitchen => "Kitchen or kitchenette",
+        :has_pool => "Pool", :has_tv => "TV", :has_kettle => "Kettle",
+        :has_washer => "Washing machine", :has_dishwasher => "Dishwasher",
+        :has_elevator => "Elevator", :has_self_checkin => "Self check-in",
+    ),
+
+    # readable names of coefficients (names as coeftable writes them)
+    term_labels = Dict(
+        "accommodates" => "each extra guest",
+        "proximity_city_center" => "each km from the centre",
+        "minimum_nights" => "longer minimum stay (log)",
+        "room_type: Private room" => "private room instead of entire home",
+        "is_superhost" => "Superhost",
+        "review_scores_cleanliness" => "cleanliness rating",
+        "review_scores_accuracy" => "accuracy rating",
+    ),
+
+    # Configuration for enter_apartment_data(): the numeric questions, in the order they are asked.
+    #
+    # rules:
+    # column          column the answer is stored in
+    # value_type      type the answer is parsed into
+    # min, max        fixed limits; nothing = take the limit from the training data of the room type
+    # prompt          question shown to the user
+    # groups          :new (not listed yet), :listed, or both
+    input_rules = [
+        (column = :accommodates, value_type = Int, min = 1, max = nothing,
+         prompt = "Maximum number of guests: ", groups = [:new, :listed]),
+        (column = :bedrooms, value_type = Int, min = nothing, max = nothing,
+         prompt = "Number of bedrooms: ", groups = [:new, :listed]),
+        (column = :beds, value_type = Int, min = 1, max = nothing,
+         prompt = "Number of beds: ", groups = [:new, :listed]),
+        (column = :bathrooms, value_type = Float64, min = 0.5, max = nothing,
+         prompt = "Number of bathrooms (half bath = 0.5): ", groups = [:new, :listed]),
+        (column = :minimum_nights, value_type = Int, min = 1, max = nothing,
+         prompt = "Minimum nights per stay: ", groups = [:new, :listed]),
+        (column = :price, value_type = Float64, min = nothing, max = nothing,
+         prompt = "Your current price per night (EUR): ", groups = [:listed]),
+        (column = :review_scores_rating, value_type = Float64, min = 1.0, max = 5.0,
+         prompt = "Your average rating (1 to 5): ", groups = [:listed]),
+        (column = :estimated_occupancy_l365d, value_type = Int, min = 1, max = 255,
+         prompt = "Nights booked in the last 12 months: ", groups = [:listed]),
+    ],
+
+    # OPTIONAL, only if address lookup is implemented
+    geocoding = (url = "https://nominatim.openstreetmap.org/search",
+                user_agent = "KLU-Project1 student project (<team e-mail>)",
+                country_code = "gr", timeout = 10),
 )
