@@ -61,7 +61,7 @@ function ask_number(prompt::String, T::Type{<:Real}, min::Real, max::Real, inclu
         # Parse number
         num = tryparse(T,s)
         # check validity of input
-        isnothing(num) && (print("Not a valid input!"; continue))
+        isnothing(num) && (println(io_out, "Not a valid input!"); continue)
         # Check range (maybe implement ranges in CONFIG?!)
         valid = inclusive_interval ? (min <= num <= max) : (min < num < max)
     end
