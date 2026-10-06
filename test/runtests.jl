@@ -1137,6 +1137,36 @@ const P = Project1
         # DataFrames throws ArgumentError when df.price does not exist
     end
 
+    @testset "plot_price_by_room_type" begin
+        # a small made-up table: 3 entire homes, 2 private rooms, 1 shared room
+        df = DataFrame(
+            room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room", "Private room", "Shared room"],
+            price = [120.0, 150, 180, 50, 70, 30],
+        )
+
+        # 1. happy path: every room type with enough listings gets a box, and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_price_by_room_type(df, 2; io = io)
+        output = String(take!(io))
+        @test occursin("Price by room type", output)
+        @test occursin("Entire home/apt", output)
+        @test occursin("Private room", output)
+        @test result === nothing
+
+        # 2. edge case: a room type below min_count does not appear
+        @test !occursin("Shared room", output)
+        # only 1 shared room, but min_count is 2, so it is left out
+
+        # 3. edge case: no room type has enough listings, so a message is printed instead of a chart
+        io = IOBuffer()
+        P.plot_price_by_room_type(df, 10; io = io)
+        @test occursin("No room type has at least 10 listings.", String(take!(io)))
+
+        # 4. error case: a table without a room_type column is rejected
+        @test_throws ArgumentError P.plot_price_by_room_type(DataFrame(price = [100.0]), 1; io = IOBuffer())
+        # groupby throws ArgumentError when the column does not exist
+    end
+    
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------

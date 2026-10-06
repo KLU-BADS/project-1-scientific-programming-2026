@@ -127,3 +127,45 @@ function plot_price_distribution(df::DataFrame; nbins::Int = 20, io::IO = stdout
     # 3. nothing to give back, the chart has only been printed
     return nothing
 end
+
+"""
+    plot_price_by_room_type(df, min_count; io = stdout)
+
+Print a boxplot of the price per night for every room type with at least `min_count` listings,
+the room type with the most listings first.
+
+# Arguments
+- `df::DataFrame`:  Processed listings with the columns `room_type` and `price`.
+- `min_count::Int`: Smallest number of listings a room type needs to get its own box.
+- `io::IO`:         Where the chart is printed (default `stdout`, the terminal).
+
+Returns `nothing`, the chart is only printed.
+"""
+function plot_price_by_room_type(df::DataFrame, min_count::Int; io::IO = stdout)
+    # 1. count the listings of every room type
+    counts = combine(groupby(df, :room_type), nrow => :n)
+    # groupby puts the rows of each room type together, combine with nrow counts them: one row per room type
+
+    # 2. keep only the room types with enough listings, the largest first
+    counts = counts[counts.n .>= min_count, :]
+    sort!(counts, :n, rev = true)
+    rts = counts.room_type
+    # rev = true sorts from large to small, so the most common room type is drawn on top
+
+    # 3. stop with a short message if no room type is left, because boxplot cannot draw zero boxes
+    if isempty(rts)
+        println(io, "No room type has at least $min_count listings.")
+        return nothing
+    end
+
+    # 4. collect the prices of each kept room type
+    data = [df.price[df.room_type .== rt] for rt in rts]
+    # for every room type rt, take the prices of the rows whose room_type equals rt: one vector of prices per box
+
+    # 5. draw one box per room type and print the chart
+    chart = boxplot(String.(rts), data; title = "Price by room type", xlabel = "EUR")
+    # String.() turns the labels into plain text, because CSV reads them as String15, which boxplot does not accept
+    println(io, chart)
+
+    return nothing
+end
