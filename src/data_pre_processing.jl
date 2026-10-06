@@ -622,6 +622,50 @@ function remove_implausible!(df::DataFrame, rules::Vector{<:NamedTuple})
 end
 
 """
+    cap_values!(df::DataFrame, caps::AbstractDict, rule::NamedTuple) -> DataFrame
+
+Limit the size columns of each listing to the cap of its room type.
+
+A value above the cap becomes the cap; a value below or exactly on the cap stays. No row is removed. The same function is used for the training data and for the user's input.
+
+# Arguments
+- `df::DataFrame`: Listings table with the columns of the rule.
+- `caps::AbstractDict`: Caps from `compute_caps`, keyed by `(room_type, column)`.
+- `rule::NamedTuple`: Cap rule with the fields `columns` (the columns to cap) and `group_by` (the column with the room type).
+
+Returns the modified DataFrame in place. Throws an `ArgumentError` if a room type has no cap.
+"""
+function cap_values!(df::DataFrame, caps::AbstractDict, rule::NamedTuple)
+    # 1. go through the rows one by one
+    for i in 1:nrow(df)
+        # 2. the room type of this row
+        # the caps are looked up by room type and column
+        room_type = String(df[i, rule.group_by])
+
+        # 3. check every column of the rule
+        for column in rule.columns
+            # 4. the key of this cap
+            key = (room_type, column)
+
+            # 5. a room type without a cap is an error
+            # at prediction time this means the room type was not in the training data
+            if !haskey(caps, key)
+                throw(ArgumentError("no cap for room type \"$room_type\" and column $column"))
+            end
+
+            # 6. only a value above the cap is lowered
+            # the caps are whole numbers, so an Int column stays an Int column
+            if df[i, column] > caps[key]
+                df[i, column] = caps[key]
+            end
+        end
+    end
+
+    # 7. return the modified table
+    return df
+end
+
+"""
     format_dummies!(df, rules)
 
 Create dummy variables for categorical columns according to the configured rules.

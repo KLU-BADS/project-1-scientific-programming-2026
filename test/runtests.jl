@@ -669,6 +669,54 @@ const P = Project1
         # the limit cannot be calculated from an empty cell either
     end
 
+    @testset "cap_values!" begin
+        # 1. the cap rule and the caps, written here so the test does not depend on CONFIG or compute_caps
+        # the quantile of the rule is not used by cap_values!, only the columns and the group_by column
+        rule = (columns = [:accommodates, :bathrooms], group_by = :room_type, quantile = 0.75)
+        caps = Dict{Tuple{String,Symbol},Float64}(
+            ("Entire home/apt", :accommodates) => 8.0,
+            ("Entire home/apt", :bathrooms) => 2.0,
+            ("Private room", :accommodates) => 3.0,
+            ("Private room", :bathrooms) => 1.0,
+        )
+
+        # 2. a table with two room types whose rows are mixed
+        # each room type has values below the cap, exactly on the cap and above the cap
+        df = DataFrame(
+            room_type = [
+                "Entire home/apt", "Private room", "Entire home/apt", "Private room",
+                "Entire home/apt", "Private room", "Entire home/apt", "Private room",
+                "Entire home/apt", "Private room",
+            ],
+            accommodates = [2, 1, 4, 2, 6, 2, 8, 3, 100, 50],
+            bathrooms = [1.0, 1.0, 1.5, 1.0, 2.0, 1.0, 2.5, 1.5, 9.0, 5.0],
+        )
+        room_types_before = copy(df.room_type)
+
+        result = P.cap_values!(df, caps, rule)
+
+        # 3. the function returns the modified table itself, no row is removed
+        @test result === df
+        @test nrow(df) == 10
+
+        # 4. values above the cap become the cap, values below or exactly on it stay
+        # entire homes: 8 guests is exactly on the cap and stays, 100 becomes 8
+        # private rooms: 3 guests is exactly on the cap and stays, 50 becomes 3
+        @test df.accommodates == [2, 1, 4, 2, 6, 2, 8, 3, 8, 3]
+        @test df.bathrooms == [1.0, 1.0, 1.5, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0]
+
+        # 5. an Int column stays an Int column
+        @test eltype(df.accommodates) == Int
+
+        # 6. the room types are not changed
+        @test df.room_type == room_types_before
+
+        # 7. error case: a room type that has no cap
+        df = DataFrame(room_type = ["Hotel room"], accommodates = [2], bathrooms = [1.0])
+        @test_throws ArgumentError P.cap_values!(df, caps, rule)
+        # a room type that was not in the training data cannot be capped
+    end
+
     @testset "format_dummies!" begin
         washer_rule = only(filter(r -> r.target == :has_washer, P.CONFIG.dummy_rules))
         pool_rule = only(filter(r -> r.target == :has_pool, P.CONFIG.dummy_rules))
