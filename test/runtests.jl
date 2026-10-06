@@ -604,6 +604,71 @@ const P = Project1
         # only :iqr exists, any other method stops before anything is changed
     end
  
+    @testset "remove_implausible!" begin
+        # rules = [(column, max_of, factor, offset)]: a row is kept if df[i, column] <= factor * df[i, max_of] + offset
+        # - a row that breaks a rule is removed, the others stay (other columns keep their values)
+        # - a value exactly on the limit stays
+        # - several rules with factor and offset: a row is removed if it breaks at least one of them
+        # - nothing to remove / no rules: the table stays as it is
+        # - errors: a missing value in a rule column
+        rules = [(column = :bedrooms, max_of = :accommodates, factor = 1.0, offset = 0.0)]
+        # one rule: bedrooms <= 1 * accommodates + 0, small tables are enough
+
+        # 1. happy path: a row that breaks the rule is removed, the others stay
+        df = DataFrame(id = 1:3, accommodates = [2, 4, 2], bedrooms = [1, 2, 50], price = [100.0, 200.0, 300.0])
+        out = P.remove_implausible!(df, rules)
+        @test df.id == [1, 2]
+        # row 3 has 50 bedrooms for 2 guests, so it is a data error and goes
+        @test out === df
+        # === checks that the function returns the very same table, as promised in the docstring
+
+        # 2. nothing else changed: the other columns lose the same row and keep their values
+        @test df.price == [100.0, 200.0]
+        # the price column lost row 3 together with the rest of the row, the rows still match
+
+        # 3. edge case: a value exactly on the limit stays
+        df = DataFrame(id = 1:3, accommodates = [2, 2, 2], bedrooms = [2, 3, 1])
+        P.remove_implausible!(df, rules)
+        @test df.id == [1, 3]
+        # 2 bedrooms for 2 guests is exactly the limit (<=), so it stays; 3 bedrooms is above it and goes
+
+        # 4. several rules with factor and offset: a row is removed if it breaks at least one rule
+        rules2 = [(column = :beds, max_of = :accommodates, factor = 2.0, offset = 0.0),
+                  (column = :bathrooms, max_of = :bedrooms, factor = 1.0, offset = 2.0)]
+        # rule 1: beds <= 2 * accommodates, rule 2: bathrooms <= bedrooms + 2
+        df = DataFrame(id = 1:5,
+                       accommodates = [2, 2, 4, 4, 4],
+                       bedrooms = [1, 1, 2, 2, 2],
+                       beds = [4, 5, 3, 3, 8],
+                       bathrooms = [1, 1, 4, 5, 1])
+        P.remove_implausible!(df, rules2)
+        @test df.id == [1, 3, 5]
+        # row 2 has 5 beds for 2 guests (rule 1), row 4 has 5 bathrooms for 2 bedrooms (rule 2): both go
+        # rows 1, 3 and 5 are exactly on a limit or below it, so they stay
+
+        # 5. edge case: nothing breaks a rule, the table stays as it is
+        df = DataFrame(accommodates = [2, 4], bedrooms = [1, 2])
+        P.remove_implausible!(df, rules)
+        @test nrow(df) == 2
+        # both rows are plausible, so nothing is removed
+
+        # 6. edge case: no rules, the table stays as it is
+        df = DataFrame(accommodates = [2, 2], bedrooms = [1, 50])
+        P.remove_implausible!(df, NamedTuple[])
+        @test nrow(df) == 2
+        # without a rule nothing can be broken, even 50 bedrooms for 2 guests stays
+
+        # 7. error case: a missing value in the checked column
+        df = DataFrame(accommodates = [2, 4], bedrooms = [1, missing])
+        @test_throws ErrorException P.remove_implausible!(df, rules)
+        # an empty cell cannot be compared with a number, process_missing! must handle it before this step
+
+        # 8. error case: a missing value in the max_of column
+        df = DataFrame(accommodates = [2, missing], bedrooms = [1, 2])
+        @test_throws ErrorException P.remove_implausible!(df, rules)
+        # the limit cannot be calculated from an empty cell either
+    end
+
     @testset "format_dummies!" begin
         washer_rule = only(filter(r -> r.target == :has_washer, P.CONFIG.dummy_rules))
         pool_rule = only(filter(r -> r.target == :has_pool, P.CONFIG.dummy_rules))
