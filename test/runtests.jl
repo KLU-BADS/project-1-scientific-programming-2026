@@ -1080,7 +1080,7 @@ const P = Project1
         # x::Real only accepts numbers, so Julia finds no matching method for a String
     end
 
-        @testset "range_bar" begin
+    @testset "range_bar" begin
         # 1. happy path: the predicted price in the middle of the range sits in the middle of the bar
         @test P.range_bar(60, 140, 100; width = 9) == "€60 [====●====] €140"
         # 100 is halfway between 60 and 140, so ● lands on place 5 of 9
