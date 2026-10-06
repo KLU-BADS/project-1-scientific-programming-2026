@@ -1080,6 +1080,40 @@ const P = Project1
         # x::Real only accepts numbers, so Julia finds no matching method for a String
     end
 
+        @testset "range_bar" begin
+        # 1. happy path: the predicted price in the middle of the range sits in the middle of the bar
+        @test P.range_bar(60, 140, 100; width = 9) == "€60 [====●====] €140"
+        # 100 is halfway between 60 and 140, so ● lands on place 5 of 9
+
+        # 2. happy path: the marker sits at the ends when the price is at the lower or upper end
+        @test P.range_bar(60, 140, 60; width = 9) == "€60 [●========] €140"
+        @test P.range_bar(60, 140, 140; width = 9) == "€60 [========●] €140"
+
+        # 3. happy path: a current price inside the range gets ▲ and the bar keeps its ends
+        @test P.range_bar(60, 140, 100; width = 9, current = 80) == "€60 [==▲=●====] €140"
+
+        # 4. edge case: a current price above the range stretches the bar up to that price
+        @test P.range_bar(60, 140, 100; width = 9, current = 180) == "€60 [===●==  ▲] €180"
+        # the range 60 to 140 now covers only places 1 to 6, the empty places lead up to ▲ at 180
+
+        # 5. edge case: a range of one single price puts the marker in the middle
+        @test P.range_bar(100, 100, 100; width = 9) == "€100 [    ●    ] €100"
+        # without the hi == lo line this would divide by zero
+
+        # 6. edge case: a predicted price outside the range is kept on the bar
+        @test P.range_bar(60, 140, 40; width = 9) == "€60 [●========] €140"
+        # clamp moves it to the first place instead of falling off the bar
+
+        # 7. edge case: the default bar has 30 characters between the brackets
+        bar = P.range_bar(66, 140, 100)
+        @test length(split(bar, ['[', ']'])[2]) == 30
+        # split cuts the text at [ and ], so part 2 is the bar itself; length counts characters, not bytes
+
+        # 8. error case: an upside down range and a bar without places are rejected
+        @test_throws ArgumentError P.range_bar(140, 60, 100)
+        @test_throws ArgumentError P.range_bar(60, 140, 100; width = 0)
+    end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------
