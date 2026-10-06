@@ -630,6 +630,12 @@ const P = Project1
         @test "amenities" ∉ remaining_columns 
         @test df.has_washer == [1, 0]
         @test df.id == [1, 2]
+
+        # returns the same table, as every other ! function (needed for the pipeline)
+        df = DataFrame(amenities = ["[\"Washer\", \"Wifi\"]"])
+        out = P.format_dummies!(df, washer_rule)
+        @test out === df
+        # === checks that the function returns the very same table, as promised in the docstring
         # - "Washer" -> 1, "Dishwasher" -> 0 for has_washer; "Pool" -> 1, "Pool table" -> 0 for has_pool
         # - the new column holds whole numbers (eltype Int)
         # - is_superhost "t"/"f" becomes 1/0 in the same column
@@ -693,12 +699,22 @@ const P = Project1
         P.calculate_distance!(df, dist_rule, cent_coordinates)
         @test df.proximity_city_center ≈ [111.19] atol = 0.05
 
-        # 4: Testing if delete removes latitude and longitude 
+        # 4: delete = true removes latitude and longitude
+        delete_rule = merge(dist_rule, (delete = true,))
+        # merge makes a copy of the rule where only delete is changed, so the test does not depend on the config value
         df = DataFrame(id = [1, 2], latitude = [cent_coordinates.latitude, cent_coordinates.latitude + 1], longitude = [cent_coordinates.longitude, cent_coordinates.longitude])
-        P.calculate_distance!(df, dist_rule, cent_coordinates)
-        @test "latitude" ∉ names(df) 
+        P.calculate_distance!(df, delete_rule, cent_coordinates)
+        @test "latitude" ∉ names(df)
         @test "longitude" ∉ names(df)
         @test df.id == [1, 2]
+        @test "proximity_city_center" ∈ names(df)
+
+        # 5: delete = false keeps latitude and longitude
+        keep_rule = merge(dist_rule, (delete = false,))
+        df = DataFrame(id = [1, 2], latitude = [cent_coordinates.latitude, cent_coordinates.latitude + 1], longitude = [cent_coordinates.longitude, cent_coordinates.longitude])
+        P.calculate_distance!(df, keep_rule, cent_coordinates)
+        @test "latitude" ∈ names(df)
+        @test "longitude" ∈ names(df)
         @test "proximity_city_center" ∈ names(df)
         # - a listing at the city center has distance 0
         # - one degree of latitude north of the center is about 111.19 km (atol = 0.05)
