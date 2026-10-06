@@ -1166,7 +1166,37 @@ const P = Project1
         @test_throws ArgumentError P.plot_price_by_room_type(DataFrame(price = [100.0]), 1; io = IOBuffer())
         # groupby throws ArgumentError when the column does not exist
     end
-    
+
+    @testset "plot_group_importance" begin
+        # a small made-up importance table like the one group_importance gives back
+        importance = DataFrame(group = ["location", "size"], r2_loss = [0.12, 0.08])
+
+        # 1. happy path: every group name appears and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_group_importance(importance; io = io)
+        output = String(take!(io))
+        @test occursin("What drives the price", output)
+        @test occursin("location", output)
+        @test occursin("size", output)
+        @test result === nothing
+
+        # 2. edge case: a group with a negative loss still prints instead of stopping with an error
+        importance_negative = DataFrame(group = ["location", "amenities"], r2_loss = [0.12, -0.01])
+        io = IOBuffer()
+        P.plot_group_importance(importance_negative; io = io)
+        @test occursin("amenities", String(take!(io)))
+        # the -0.01 is drawn as 0, so the chart still has a line for amenities
+
+        # 3. edge case: an empty table prints a message instead of a chart
+        io = IOBuffer()
+        P.plot_group_importance(DataFrame(group = String[], r2_loss = Float64[]); io = io)
+        @test occursin("No groups of predictors to show.", String(take!(io)))
+
+        # 4. error case: a table without the r2_loss column is rejected
+        @test_throws ArgumentError P.plot_group_importance(DataFrame(group = ["location"]); io = IOBuffer())
+        # DataFrames throws ArgumentError when importance.r2_loss does not exist
+    end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------
@@ -1298,4 +1328,3 @@ const P = Project1
     end
  
 end
- 

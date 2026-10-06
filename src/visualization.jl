@@ -169,3 +169,34 @@ function plot_price_by_room_type(df::DataFrame, min_count::Int; io::IO = stdout)
 
     return nothing
 end
+
+"""
+    plot_group_importance(importance; io = stdout)
+
+Print a bar chart of how much each group of predictors adds to the fit of the price model.
+
+# Arguments
+- `importance::DataFrame`:  One row per group of predictors with the columns `group` (its name) and `r2_loss`
+                            (how much R² drops when the group is left out).
+- `io::IO`:                 Where the chart is printed (default `stdout`, the terminal).
+
+Returns `nothing`, the chart is only printed.
+"""
+function plot_group_importance(importance::DataFrame; io::IO = stdout)
+    # 1. stop with a short message if there is nothing to draw, because barplot cannot draw zero bars
+    if nrow(importance) == 0
+        println(io, "No groups of predictors to show.")
+        return nothing
+    end
+
+    # 2. a negative loss means the group did not help the fit, so it is shown as 0
+    losses = max.(importance.r2_loss, 0)
+    # max.(x, 0) goes through every value and replaces it by 0 if it is below 0; barplot stops with an error on negative values
+
+    # 3. draw one bar per group and print the chart
+    chart = barplot(String.(importance.group), losses; title = "What drives the price")
+    # String.() makes sure the names are plain text, also if they are stored as symbols like :location
+    println(io, chart)
+
+    return nothing
+end
