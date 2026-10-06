@@ -1062,8 +1062,18 @@ const P = Project1
         # It checks that the finished table is good enough to fit the regression models
 
         # 1. run the whole training pipeline once on the file of the city in the config
-        df = P.run_training_pipeline()
+        result = P.run_training_pipeline()
+        # the pipeline returns (df, fitted): the cleaned table and the values saved from training
+        df = result.df
         # df is the cleaned table; all checks below use it, so the pipeline runs only once and every check sees the same result
+        @test df isa DataFrame
+        # the table is a normal DataFrame
+        @test keys(result.fitted) == (:caps, :kept_districts, :square_centers)
+        # keys(...) lists the names inside fitted, in this order; prediction later reads exactly these three values
+        @test result.fitted.caps isa AbstractDict
+        @test result.fitted.kept_districts isa Vector{String}
+        @test result.fitted.square_centers isa AbstractDict
+        # the caps and the square centres are lookup tables (Dict), the kept districts are a list of text
 
         # 2. enough rows are left after cleaning
         raw_rows = nrow(P.import_csv(P.CONFIG.filepath))
@@ -1135,7 +1145,9 @@ const P = Project1
         # - one fit and one score per entry of P.CONFIG.regression_models
         # - df_training and df_test together have as many rows as the input
         # - the price model reaches an R2 on the log scale above 0.5 on the test set
-        df = P.run_training_pipeline()
+        pipeline_result = P.run_training_pipeline()
+        # the training pipeline returns (df, fitted): the analysis pipeline needs only the cleaned table
+        df = pipeline_result.df
         result = P.run_analysis_pipeline(df)
         # df = run training pipeline function inside project 1
         # result = run analysis pipeline function inside project 1 on df 
