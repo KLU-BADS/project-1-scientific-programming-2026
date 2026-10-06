@@ -711,7 +711,7 @@ function calculate_distance!(df::DataFrame, rule::NamedTuple, center::NamedTuple
 end
 
 """
-    Project1.kept_categories(df, rule) -> Vector{String}
+    kept_categories(df, rule) -> Vector{String}
 
 Return the categories of the column named in `rule.column` that occur in at least `rule.min_count` rows.
 
@@ -735,7 +735,7 @@ julia> df = DataFrame(district = ["Plaka", "Plaka", "Plaka", "Kolonaki", "Kolona
 
 julia> rule = (column = :district, min_count = 2, other_label = "_other");
 
-julia> kept_categories(df, rule)
+julia> Project1.kept_categories(df, rule)
 2-element Vector{String}:
  "Plaka"
  "Kolonaki"
@@ -752,7 +752,7 @@ function kept_categories(df::DataFrame, rule::NamedTuple)
 end
 
 """
-    Project1.group_rare_categories!(df, rule, kept) -> df
+    group_rare_categories!(df, rule, kept) -> df
 
 Replace every value of the column named in `rule.column` that is not in `kept` with `rule.other_label`.
 
@@ -777,7 +777,7 @@ julia> df = DataFrame(district = ["Plaka", "Kolonaki", "Exarchia"]);
 
 julia> rule = (column = :district, min_count = 2, other_label = "_other");
 
-julia> group_rare_categories!(df, rule, ["Plaka", "Kolonaki"]);
+julia> Project1.group_rare_categories!(df, rule, ["Plaka", "Kolonaki"]);
 
 julia> df.district
 3-element Vector{String}:
