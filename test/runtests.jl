@@ -1123,7 +1123,9 @@ const P = Project1
         # - one fit and one score per entry of P.CONFIG.regression_models
         # - df_training and df_test together have as many rows as the input
         # - the price model reaches an R2 on the log scale above 0.5 on the test set
-        df = P.run_training_pipeline()
+        pipeline_result = P.run_training_pipeline()
+        # the training pipeline returns (df, fitted): the analysis pipeline needs only the cleaned table
+        df = pipeline_result.df
         result = P.run_analysis_pipeline(df)
         # df = run training pipeline function inside project 1
         # result = run analysis pipeline function inside project 1 on df 
