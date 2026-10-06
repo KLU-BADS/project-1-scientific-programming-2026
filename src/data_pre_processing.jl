@@ -613,7 +613,10 @@ function format_dummies!(df::DataFrame, rules::NamedTuple)
     if rules.delete == true && rules.source != rules.target
         select!(df, Not(rules.source))
         #select = says which columns to keep and Not says which ones to remove, so from df keep everything, but not rule.source
-    end 
+    end
+    # 6. return the table
+    return df
+    # the docstring promises the modified DataFrame, so the pipeline can continue with it
 end
 
 """
