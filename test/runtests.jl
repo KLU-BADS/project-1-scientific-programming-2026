@@ -1127,6 +1127,75 @@ const P = Project1
      end
 
     # ------------------------------------------------------------------------------------------
+    # visualization.jl
+    # ------------------------------------------------------------------------------------------
+
+    @testset "format_eur" begin
+        # 1. happy path: whole euros get a comma between every three digits
+        @test P.format_eur(7272) == "€7,272"
+        @test P.format_eur(1234567.8) == "€1,234,568"
+        # 1234567.8 is rounded to 1234568 first, then two commas are added
+        @test P.format_eur(140) == "€140"
+        # three digits or fewer need no comma
+
+        # 2. happy path: decimals are kept when digits is given
+        @test P.format_eur(7.5; digits = 2) == "€7.50"
+        @test P.format_eur(1234.5; digits = 2) == "€1,234.50"
+        # the comma only goes into the whole part, the decimals stay as they are
+
+        # 3. edge case: zero and a negative amount
+        @test P.format_eur(0) == "€0"
+        @test P.format_eur(-1234) == "€-1,234"
+        # no comma after the minus sign, because the pattern needs a digit before the comma
+
+        # 4. error case: text instead of a number is not accepted
+        @test_throws MethodError P.format_eur("7272")
+        # x::Real only accepts numbers, so Julia finds no matching method for a String
+    end
+
+    @testset "range_bar" begin
+        # 1. happy path: the predicted price in the middle of the range sits in the middle of the bar
+        @test P.range_bar(60, 140, 100; width = 9) == "€60 [====●====] €140"
+        # 100 is halfway between 60 and 140, so ● lands on place 5 of 9
+
+        # 2. happy path: the marker sits at the ends when the price is at the lower or upper end
+        @test P.range_bar(60, 140, 60; width = 9) == "€60 [●========] €140"
+        @test P.range_bar(60, 140, 140; width = 9) == "€60 [========●] €140"
+
+        # 3. happy path: a current price inside the range gets ▲ and the bar keeps its ends
+        @test P.range_bar(60, 140, 100; width = 9, current = 80) == "€60 [==▲=●====] €140"
+
+        # 4. edge case: a current price above the range stretches the bar up to that price
+        @test P.range_bar(60, 140, 100; width = 9, current = 180) == "€60 [===●==  ▲] €180"
+        # the range 60 to 140 now covers only places 1 to 6, the empty places lead up to ▲ at 180
+
+        # 5. edge case: a range of one single price puts the marker in the middle
+        @test P.range_bar(100, 100, 100; width = 9) == "€100 [    ●    ] €100"
+        # without the hi == lo line this would divide by zero
+
+        # 6. edge case: a predicted price outside the range is kept on the bar
+        @test P.range_bar(60, 140, 40; width = 9) == "€60 [●========] €140"
+        # clamp moves it to the first place instead of falling off the bar
+
+        # 7. edge case: the default bar has 30 characters between the brackets
+        bar = P.range_bar(66, 140, 100)
+        @test length(split(bar, ['[', ']'])[2]) == 30
+        # split cuts the text at [ and ], so part 2 is the bar itself; length counts characters, not bytes
+
+        # 8. edge case: a current price below the range stretches the bar down to that price
+        @test P.range_bar(60, 140, 100; width = 9, current = 20) == "€20 [▲  ==●===] €140"
+        # the bar now starts at 20, so the range 60 to 140 only covers places 4 to 9
+
+        # 9. edge case: a current price on the same place as the predicted one shows ▲
+        @test P.range_bar(60, 140, 100; width = 9, current = 100) == "€60 [====▲====] €140"
+        # ▲ is set after ●, so it stays visible when both land on place 5
+
+        # 10. error case: an upside down range and a bar without places are rejected
+        @test_throws ArgumentError P.range_bar(140, 60, 100)
+        @test_throws ArgumentError P.range_bar(60, 140, 100; width = 0)
+    end
+
+    # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------
  
