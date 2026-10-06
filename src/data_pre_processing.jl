@@ -710,6 +710,38 @@ function calculate_distance!(df::DataFrame, rule::NamedTuple, center::NamedTuple
     return df
 end
 
+"""
+    kept_categories(df, rule) -> Vector{String}
+
+Return the categories of the column named in `rule.column` that occur in at least `rule.min_count` rows.
+
+Run once on the training data. The result is saved (as `fitted.kept_districts`) and passed to
+`group_rare_categories!`, both in training and at prediction time, so a user's apartment is
+grouped exactly like the training data. The table itself is not changed.
+
+# Arguments
+- `df::DataFrame`:     The cleaned listings data.
+- `rule::NamedTuple`:  The category rule, e.g. `CONFIG.category_rule`, with the fields
+                       `column` (the column to count, e.g. `:district`) and
+                       `min_count` (the minimum number of rows a category needs to be kept).
+
+Returns the kept category names as a `Vector{String}`, in order of first appearance in `df`.
+
+# Examples
+```jldoctest
+julia> using DataFrames
+
+julia> df = DataFrame(district = ["Plaka", "Plaka", "Plaka", "Kolonaki", "Kolonaki", "Exarchia"]);
+
+julia> rule = (column = :district, min_count = 2, other_label = "_other");
+
+julia> kept_categories(df, rule)
+2-element Vector{String}:
+ "Plaka"
+ "Kolonaki"
+```
+"""
+
 function kept_categories(df::DataFrame, rule::NamedTuple)
     # 1. count the rows per category of the column named in the rule
     grouped = groupby(df, rule.column)
@@ -719,6 +751,42 @@ function kept_categories(df::DataFrame, rule::NamedTuple)
     # 3. return their names as a list
     return String.(kept_rows[!, rule.column])
 end
+
+"""
+    group_rare_categories!(df, rule, kept) -> df
+
+Replace every value of the column named in `rule.column` that is not in `kept` with `rule.other_label`.
+
+Rare categories are pooled into one group, so the regression estimates one effect for them instead
+of unreliable effects from a handful of listings. No rows are removed and no other column is changed.
+
+# Arguments
+- `df::DataFrame`:          The listings data, or the one-row table of a user's apartment.
+- `rule::NamedTuple`:       The category rule, e.g. `CONFIG.category_rule`, with the fields
+                            `column` (the column to group, e.g. `:district`) and
+                            `other_label` (the replacement text, e.g. `"_other"`).
+- `kept::Vector{String}`:   The categories to keep unchanged, as returned by `kept_categories`
+                            on the training data.
+
+Returns the modified DataFrame in place.
+
+# Examples
+```jldoctest
+julia> using DataFrames
+
+julia> df = DataFrame(district = ["Plaka", "Kolonaki", "Exarchia"]);
+
+julia> rule = (column = :district, min_count = 2, other_label = "_other");
+
+julia> group_rare_categories!(df, rule, ["Plaka", "Kolonaki"]);
+
+julia> df.district
+3-element Vector{String}:
+ "Plaka"
+ "Kolonaki"
+ "_other"
+```
+"""
 
 function group_rare_categories!(df::DataFrame, rule::NamedTuple, kept::Vector{String})
     # 1. get the category column named in the rule
