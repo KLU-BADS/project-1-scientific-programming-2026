@@ -1109,7 +1109,15 @@ const P = Project1
         @test length(split(bar, ['[', ']'])[2]) == 30
         # split cuts the text at [ and ], so part 2 is the bar itself; length counts characters, not bytes
 
-        # 8. error case: an upside down range and a bar without places are rejected
+        # 8. edge case: a current price below the range stretches the bar down to that price
+        @test P.range_bar(60, 140, 100; width = 9, current = 20) == "€20 [▲  ==●===] €140"
+        # the bar now starts at 20, so the range 60 to 140 only covers places 4 to 9
+
+        # 9. edge case: a current price on the same place as the predicted one shows ▲
+        @test P.range_bar(60, 140, 100; width = 9, current = 100) == "€60 [====▲====] €140"
+        # ▲ is set after ●, so it stays visible when both land on place 5
+
+        # 10. error case: an upside down range and a bar without places are rejected
         @test_throws ArgumentError P.range_bar(140, 60, 100)
         @test_throws ArgumentError P.range_bar(60, 140, 100; width = 0)
     end
