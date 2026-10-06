@@ -1197,6 +1197,29 @@ const P = Project1
         # DataFrames throws ArgumentError when importance.r2_loss does not exist
     end
 
+    @testset "plot_predicted_vs_actual" begin
+        # made-up prices of four test listings and what a model predicted for them
+        actual = [50.0, 80, 120, 200]
+        predicted = [60.0, 85, 110, 170]
+
+        # 1. happy path: the chart is printed with its title and axis label, and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_predicted_vs_actual(actual, predicted; io = io)
+        output = String(take!(io))
+        @test occursin("Test set", output)
+        @test occursin("actual EUR", output)
+        @test result === nothing
+
+        # 2. edge case: perfect predictions, every dot lies on the diagonal, still prints without error
+        io = IOBuffer()
+        P.plot_predicted_vs_actual(actual, actual; io = io)
+        @test occursin("Test set", String(take!(io)))
+
+        # 3. error case: vectors of different length and empty vectors are rejected
+        @test_throws DimensionMismatch P.plot_predicted_vs_actual([50.0, 80], [60.0]; io = IOBuffer())
+        @test_throws ArgumentError P.plot_predicted_vs_actual(Float64[], Float64[]; io = IOBuffer())
+    end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------

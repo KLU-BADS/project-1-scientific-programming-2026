@@ -200,3 +200,37 @@ function plot_group_importance(importance::DataFrame; io::IO = stdout)
 
     return nothing
 end
+
+"""
+    plot_predicted_vs_actual(actual, predicted; io = stdout)
+
+Print a scatter plot of the predicted against the actual price of every listing in the test set,
+with the diagonal where both are equal.
+
+# Arguments
+- `actual::AbstractVector`:     Real prices of the test listings.
+- `predicted::AbstractVector`:  Prices the model predicts for the same listings, in the same order.
+- `io::IO`:                     Where the chart is printed (default `stdout`, the terminal).
+
+Returns `nothing`, the chart is only printed.
+"""
+function plot_predicted_vs_actual(actual::AbstractVector, predicted::AbstractVector; io::IO = stdout)
+    # 1. both vectors must describe the same listings, and there must be at least one
+    length(actual) != length(predicted) && throw(DimensionMismatch("actual has $(length(actual)) values but predicted has $(length(predicted))"))
+    isempty(actual) && throw(ArgumentError("actual and predicted must not be empty"))
+    # DimensionMismatch is Julia's error for vectors of different lengths, get_r2 uses the same check
+
+    # 2. one dot per listing: the real price from left to right, the predicted price from bottom to top
+    chart = scatterplot(actual, predicted; xlabel = "actual EUR", ylabel = "predicted EUR", title = "Test set")
+
+    # 3. add the diagonal where predicted equals actual
+    lo, hi = extrema(actual)
+    lineplot!(chart, [lo, hi], [lo, hi])
+    # extrema gives the smallest and the largest value at once, the line goes from (lo, lo) to (hi, hi)
+    # dots above the line were predicted too high, dots below too low
+
+    # 4. print the chart
+    println(io, chart)
+
+    return nothing
+end
