@@ -1054,6 +1054,33 @@ const P = Project1
      end
 
     # ------------------------------------------------------------------------------------------
+    # visualization.jl
+    # ------------------------------------------------------------------------------------------
+
+    @testset "format_eur" begin
+        # 1. happy path: whole euros get a comma between every three digits
+        @test P.format_eur(7272) == "€7,272"
+        @test P.format_eur(1234567.8) == "€1,234,568"
+        # 1234567.8 is rounded to 1234568 first, then two commas are added
+        @test P.format_eur(140) == "€140"
+        # three digits or fewer need no comma
+
+        # 2. happy path: decimals are kept when digits is given
+        @test P.format_eur(7.5; digits = 2) == "€7.50"
+        @test P.format_eur(1234.5; digits = 2) == "€1,234.50"
+        # the comma only goes into the whole part, the decimals stay as they are
+
+        # 3. edge case: zero and a negative amount
+        @test P.format_eur(0) == "€0"
+        @test P.format_eur(-1234) == "€-1,234"
+        # no comma after the minus sign, because the pattern needs a digit before the comma
+
+        # 4. error case: text instead of a number is not accepted
+        @test_throws MethodError P.format_eur("7272")
+        # x::Real only accepts numbers, so Julia finds no matching method for a String
+    end
+
+    # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------
  
