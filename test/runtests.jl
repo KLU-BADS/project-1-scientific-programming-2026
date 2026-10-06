@@ -669,6 +669,46 @@ const P = Project1
         # the limit cannot be calculated from an empty cell either
     end
 
+    @testset "compute_caps" begin
+        # 1. the cap rule, written here so the test does not depend on CONFIG
+        # the quantile is 0.75 instead of 0.995 so that the expected caps are easy to count by hand; the code is the same
+        rule = (columns = [:accommodates, :bathrooms], group_by = :room_type, quantile = 0.75)
+
+        # 2. a table with two room types whose rows are mixed
+        # each room type has five listings and one extreme value (100 guests, 50 guests)
+        df = DataFrame(
+            room_type = [
+                "Entire home/apt", "Private room", "Entire home/apt", "Private room",
+                "Entire home/apt", "Private room", "Entire home/apt", "Private room",
+                "Entire home/apt", "Private room",
+            ],
+            accommodates = [2, 1, 4, 2, 6, 2, 8, 3, 100, 50],
+            bathrooms = [1.0, 1.0, 1.5, 1.0, 2.0, 1.0, 2.5, 1.5, 9.0, 5.0],
+        )
+        df_before = copy(df)
+
+        caps = P.compute_caps(df, rule)
+
+        # 3. one cap per room type and column, stored in a Dict
+        @test caps isa Dict{Tuple{String,Symbol},Float64}
+        @test length(caps) == 4
+
+        # 4. the cap is the quantile of the room type's own values
+        # entire homes: sorted guests 2, 4, 6, 8, 100 -> 75% quantile is 8
+        # private rooms: sorted guests 1, 2, 2, 3, 50 -> 75% quantile is 3
+        @test caps[("Entire home/apt", :accommodates)] == 8.0
+        @test caps[("Private room", :accommodates)] == 3.0
+
+        # 5. floor makes the caps whole numbers
+        # entire homes: the quantile of the bathrooms is 2.5 -> 2.0
+        # private rooms: the quantile of the bathrooms is 1.5 -> 1.0
+        @test caps[("Entire home/apt", :bathrooms)] == 2.0
+        @test caps[("Private room", :bathrooms)] == 1.0
+
+        # 6. computing the caps does not change the table
+        @test isequal(df, df_before)
+    end
+
     @testset "cap_values!" begin
         # 1. the cap rule and the caps, written here so the test does not depend on CONFIG or compute_caps
         # the quantile of the rule is not used by cap_values!, only the columns and the group_by column

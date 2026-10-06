@@ -622,6 +622,43 @@ function remove_implausible!(df::DataFrame, rules::Vector{<:NamedTuple})
 end
 
 """
+    compute_caps(df::DataFrame, rule::NamedTuple) -> Dict{Tuple{String,Symbol},Float64}
+
+Compute the upper limit (cap) of each size column for each room type.
+
+The cap is the quantile of the room type's own values, rounded down to a whole number. It is computed on the training data only; the result is saved as `fitted.caps` and reused for the user's input by `cap_values!`.
+
+# Arguments
+- `df::DataFrame`: Cleaned listings table.
+- `rule::NamedTuple`: Cap rule with the fields `columns` (the columns to cap), `group_by` (the column that defines the groups, `:room_type`) and `quantile` (for example 0.995).
+
+Returns a Dict keyed by `(room_type, column)`, e.g. `("Entire home/apt", :accommodates) => 12.0`. The table is not changed.
+"""
+function compute_caps(df::DataFrame, rule::NamedTuple)
+    # 1. the caps are collected in a Dict
+    # the key is (room type, column) and the value is the cap
+    caps = Dict{Tuple{String,Symbol},Float64}()
+
+    # 2. go through the listings of one room type at a time
+    # groupby splits the table into one sub-table per room type
+    for group in groupby(df, rule.group_by)
+        # 3. the room type of this sub-table
+        # all rows of a group have the same value, so the first row is enough
+        room_type = String(group[1, rule.group_by])
+
+        # 4. one cap per column
+        for column in rule.columns
+            # 5. the quantile of the room type's values, rounded down
+            # floor makes the cap a whole number, so an Int column stays an Int column when it is capped
+            caps[(room_type, column)] = floor(quantile(group[!, column], rule.quantile))
+        end
+    end
+
+    # 6. return all caps
+    return caps
+end
+
+"""
     cap_values!(df::DataFrame, caps::AbstractDict, rule::NamedTuple) -> DataFrame
 
 Limit the size columns of each listing to the cap of its room type.
