@@ -711,7 +711,7 @@ function calculate_distance!(df::DataFrame, rule::NamedTuple, center::NamedTuple
 end
 
 """
-    kept_categories(df, rule) -> Vector{String}
+    Project1.kept_categories(df, rule) -> Vector{String}
 
 Return the categories of the column named in `rule.column` that occur in at least `rule.min_count` rows.
 
@@ -752,7 +752,7 @@ function kept_categories(df::DataFrame, rule::NamedTuple)
 end
 
 """
-    group_rare_categories!(df, rule, kept) -> df
+    Project1.group_rare_categories!(df, rule, kept) -> df
 
 Replace every value of the column named in `rule.column` that is not in `kept` with `rule.other_label`.
 
