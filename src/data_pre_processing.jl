@@ -741,7 +741,6 @@ julia> kept_categories(df, rule)
  "Kolonaki"
 ```
 """
-
 function kept_categories(df::DataFrame, rule::NamedTuple)
     # 1. count the rows per category of the column named in the rule
     grouped = groupby(df, rule.column)
@@ -787,7 +786,6 @@ julia> df.district
  "_other"
 ```
 """
-
 function group_rare_categories!(df::DataFrame, rule::NamedTuple, kept::Vector{String})
     # 1. get the category column named in the rule
     categories = df[!, rule.column]
