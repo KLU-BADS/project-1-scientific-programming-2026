@@ -809,6 +809,62 @@ const P = Project1
         # 4. Other columns aren't touched
         @test df.id == [1, 2, 3, 4, 5, 6]
     end
+
+    @testset "square_center" begin
+        df = DataFrame(accommodates = [2, 4, 6])
+        rule = (source = :accommodates, target = :accommodates_sq, center = true)
+        
+        # 1. center = true, so returns the mean 
+        @test P.square_center(df, rule) == 4.0
+
+        # 2. center = false, so reurns 0.0
+        @test P.square_center(df, merge(rule, (center = false,))) == 0.0 
+
+        # 3. the return type is float64 in both cases
+        @test P.square_center(df, rule) isa Float64
+        @test P.square_center(df, merge(rule, (center = false,))) isa Float64
+
+        # 4. it only decides, so df remains unchanged 
+        @test names(df) == ["accommodates"]  
+        
+        # 5. Works for decimal columns and reads the column named in rule.source
+        df_2 = DataFrame(review_scores_rating = [1.0, 2.0, 4.0])
+        rule_2 = (source = :review_scores_rating, target = :rating_sq, center = true)
+       
+        @test P.square_center(df_2, rule_2) ≈ 7/3
+    end 
+
+    @testset "calculate_square!" begin
+        df = DataFrame(accommodates = [2, 4, 6])
+        rule = (source = :accommodates, target = :accommodates_sq, center = true)
+
+        result = P.calculate_square!(df, rule, 4.0)
+
+        # 1. the new column holds (value - center)^2
+        @test df.accommodates_sq == [4.0, 0.0, 4.0]
+
+        # 2. the original column remains unchanged 
+        @test df.accommodates == [2, 4, 6]
+
+        # 3. no rows were added or removed 
+        @test nrow(df) == 3
+
+        # 4. the function returns the same data frame it was given 
+        @test result === df
+
+        # 5. center = 0.0, meaning nothin is subtracted, meaning plain squares are produced
+        df_2 = DataFrame(accommodates = [2, 4, 6])
+        P.calculate_square!(df_2, rule, 0.0)
+        
+        @test df_2.accommodates_sq == [4.0, 16.0, 36.0]
+
+        # 6. missing values raise an error and data frame gets no new column 
+        df_3 = DataFrame(accommodates = [2, missing, 6])
+
+        @test_throws ErrorException P.calculate_square!(df_3, rule, 4.0)
+
+        @test names(df_3) == ["accommodates"]
+    end
     # ------------------------------------------------------------------------------------------
     # data_analysis.jl
     # ------------------------------------------------------------------------------------------
