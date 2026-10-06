@@ -786,7 +786,29 @@ const P = Project1
         # - delete = true removes latitude and longitude (if the team keeps this behaviour)
         # @test_broken false
     end
- 
+
+    @testset "kept_categories" begin
+        rule = (column = :district, min_count = 2, other_label = "_other")
+        df = DataFrame(district = ["Plaka", "Plaka", "Plaka", "Koukaki", "Koukaki", "Tiny"])
+        result = P.kept_categories(df, rule)
+
+        @test sort(result) == ["Koukaki", "Plaka"]
+        @test "Tiny" ∉ result 
+        @test result isa Vector{String}
+    end
+
+    @testset "group_rare_categories!" begin
+        rule = (column = :district, min_count = 2, other_label = "_other")
+        df = DataFrame(id = [1, 2, 3, 4, 5, 6], district = ["Plaka", "Plaka", "Plaka", "Koukaki", "Koukaki", "Tiny"])
+        kept = ["Plaka", "Koukaki"]
+        result = P.group_rare_categories!(df, rule, kept)
+        # 1. Kept districts stay unchanged + Rare districts become other 
+        @test df.district == ["Plaka", "Plaka", "Plaka", "Koukaki", "Koukaki", "_other"]
+        # 3. No rows are lost.
+        @test nrow(df) == 6
+        # 4. Other columns aren't touched
+        @test df.id == [1, 2, 3, 4, 5, 6]
+    end
     # ------------------------------------------------------------------------------------------
     # data_analysis.jl
     # ------------------------------------------------------------------------------------------
