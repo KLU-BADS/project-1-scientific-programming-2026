@@ -669,6 +669,46 @@ const P = Project1
         # the limit cannot be calculated from an empty cell either
     end
 
+    @testset "compute_caps" begin
+        # 1. the cap rule, written here so the test does not depend on CONFIG
+        # the quantile is 0.75 instead of 0.995 so that the expected caps are easy to count by hand; the code is the same
+        rule = (columns = [:accommodates, :bathrooms], group_by = :room_type, quantile = 0.75)
+
+        # 2. a table with two room types whose rows are mixed
+        # each room type has five listings and one extreme value (100 guests, 50 guests)
+        df = DataFrame(
+            room_type = [
+                "Entire home/apt", "Private room", "Entire home/apt", "Private room",
+                "Entire home/apt", "Private room", "Entire home/apt", "Private room",
+                "Entire home/apt", "Private room",
+            ],
+            accommodates = [2, 1, 4, 2, 6, 2, 8, 3, 100, 50],
+            bathrooms = [1.0, 1.0, 1.5, 1.0, 2.0, 1.0, 2.5, 1.5, 9.0, 5.0],
+        )
+        df_before = copy(df)
+
+        caps = P.compute_caps(df, rule)
+
+        # 3. one cap per room type and column, stored in a Dict
+        @test caps isa Dict{Tuple{String,Symbol},Float64}
+        @test length(caps) == 4
+
+        # 4. the cap is the quantile of the room type's own values
+        # entire homes: sorted guests 2, 4, 6, 8, 100 -> 75% quantile is 8
+        # private rooms: sorted guests 1, 2, 2, 3, 50 -> 75% quantile is 3
+        @test caps[("Entire home/apt", :accommodates)] == 8.0
+        @test caps[("Private room", :accommodates)] == 3.0
+
+        # 5. floor makes the caps whole numbers
+        # entire homes: the quantile of the bathrooms is 2.5 -> 2.0
+        # private rooms: the quantile of the bathrooms is 1.5 -> 1.0
+        @test caps[("Entire home/apt", :bathrooms)] == 2.0
+        @test caps[("Private room", :bathrooms)] == 1.0
+
+        # 6. computing the caps does not change the table
+        @test isequal(df, df_before)
+    end
+
     @testset "format_dummies!" begin
         washer_rule = only(filter(r -> r.target == :has_washer, P.CONFIG.dummy_rules))
         pool_rule = only(filter(r -> r.target == :has_pool, P.CONFIG.dummy_rules))
@@ -1015,6 +1055,39 @@ const P = Project1
         @test_throws DomainError regression_city(no_log, (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x]))
     end
  
+    @testset "regression_city with reference_levels" begin
+        # 1. made-up listings with three categories whose prices differ by category
+        df = DataFrame(
+            cat = repeat(["A", "B", "C"], 4),
+            price = [10.0, 20.0, 30.0, 11.0, 21.0, 31.0, 12.0, 22.0, 32.0, 10.5, 20.5, 30.5],
+        )
+        spec = (target = :price, log_scale = false, log1p_predictors = Symbol[], predictors = [:cat])
+
+        # 2. without the keyword nothing changes: the first category "A" is the base and has no coefficient
+        fit = P.regression_city(df, spec)
+        @test P.coefnames(fit.model) == ["(Intercept)", "cat: B", "cat: C"]
+
+        # 3. a given category becomes the base: "B" has no coefficient, "A" and "C" have one
+        fit_b = P.regression_city(df, spec; reference_levels = Dict(:cat => "B"))
+        @test P.coefnames(fit_b.model) == ["(Intercept)", "cat: A", "cat: C"]
+
+        # 4. :most_common takes the category with the most rows as the base
+        # "C" has 7 rows, "B" 3 and "A" 2, so "C" has no coefficient
+        df_common = DataFrame(
+            cat = ["A", "A", "B", "B", "B", "C", "C", "C", "C", "C", "C", "C"],
+            price = [10.0, 11.0, 20.0, 21.0, 22.0, 30.0, 31.0, 32.0, 33.0, 34.0, 35.0, 36.0],
+        )
+        fit_common = P.regression_city(df_common, spec; reference_levels = Dict(:cat => :most_common))
+        @test P.coefnames(fit_common.model) == ["(Intercept)", "cat: A", "cat: B"]
+
+        # 5. the base only changes how the coefficients are read, the predictions stay the same
+        @test P.predict_apartment_performance(fit_b, df) ≈ P.predict_apartment_performance(fit, df)
+
+        # 6. a column in reference_levels that is not a predictor of this model is ignored
+        fit_other = P.regression_city(df, spec; reference_levels = Dict(:room_type => "X"))
+        @test P.coefnames(fit_other.model) == ["(Intercept)", "cat: B", "cat: C"]
+    end
+
      @testset "get_r2" begin
         
         # real values vector
@@ -1109,7 +1182,15 @@ const P = Project1
         @test length(split(bar, ['[', ']'])[2]) == 30
         # split cuts the text at [ and ], so part 2 is the bar itself; length counts characters, not bytes
 
-        # 8. error case: an upside down range and a bar without places are rejected
+        # 8. edge case: a current price below the range stretches the bar down to that price
+        @test P.range_bar(60, 140, 100; width = 9, current = 20) == "€20 [▲  ==●===] €140"
+        # the bar now starts at 20, so the range 60 to 140 only covers places 4 to 9
+
+        # 9. edge case: a current price on the same place as the predicted one shows ▲
+        @test P.range_bar(60, 140, 100; width = 9, current = 100) == "€60 [====▲====] €140"
+        # ▲ is set after ●, so it stays visible when both land on place 5
+
+        # 10. error case: an upside down range and a bar without places are rejected
         @test_throws ArgumentError P.range_bar(140, 60, 100)
         @test_throws ArgumentError P.range_bar(60, 140, 100; width = 0)
     end
