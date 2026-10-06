@@ -1,4 +1,4 @@
-using Printf
+using DataFrames, Printf, UnicodePlots
 
 """
     format_eur(x; digits = 0)
@@ -101,4 +101,29 @@ function range_bar(lower::Real, upper::Real, value::Real; width::Int = 30, curre
 
     # 5. join everything into one text with the euro amounts at both ends
     return format_eur(lo) * " [" * String(chars) * "] " * format_eur(hi)
+end
+
+"""
+    plot_price_distribution(df; nbins = 20, io = stdout)
+
+Print a histogram of the price per night of all listings in `df`, to show how the prices in the city are spread.
+
+# Arguments
+- `df::DataFrame`:  Processed listings with a `price` column.
+- `nbins::Int`:     Number of bars of the histogram (default 20).
+- `io::IO`:         Where the chart is printed (default `stdout`, the terminal).
+
+Returns `nothing`, the chart is only printed.
+"""
+function plot_price_distribution(df::DataFrame; nbins::Int = 20, io::IO = stdout)
+    # 1. build the histogram: the prices are sorted into nbins bands of equal width
+    chart = histogram(df.price; nbins = nbins, title = "Price per night (EUR)")
+    # histogram counts how many listings fall into each price band and draws one bar per band
+
+    # 2. print the chart to io
+    println(io, chart)
+    # io is the terminal by default; the tests pass an IOBuffer instead, which collects the text so it can be checked
+
+    # 3. nothing to give back, the chart has only been printed
+    return nothing
 end

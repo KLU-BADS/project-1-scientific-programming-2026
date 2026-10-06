@@ -1114,6 +1114,29 @@ const P = Project1
         @test_throws ArgumentError P.range_bar(60, 140, 100; width = 0)
     end
 
+    @testset "plot_price_distribution" begin
+        # a small made-up table with prices per night
+        df = DataFrame(price = [50.0, 60, 70, 80, 90, 100, 120, 140, 200, 400])
+
+        # 1. happy path: the chart is printed with its title and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_price_distribution(df; io = io)
+        output = String(take!(io))
+        # take! empties the IOBuffer and gives back what was printed into it, String turns it into text
+        @test occursin("Price per night (EUR)", output)
+        @test result === nothing
+        # === checks it is exactly nothing, not just something equal to it
+
+        # 2. edge case: a different number of bars still prints a chart
+        io = IOBuffer()
+        P.plot_price_distribution(df; nbins = 3, io = io)
+        @test occursin("Price per night (EUR)", String(take!(io)))
+
+        # 3. error case: a table without a price column is rejected
+        @test_throws ArgumentError P.plot_price_distribution(DataFrame(x = [1, 2]); io = IOBuffer())
+        # DataFrames throws ArgumentError when df.price does not exist
+    end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------
