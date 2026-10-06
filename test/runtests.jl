@@ -1015,6 +1015,39 @@ const P = Project1
         @test_throws DomainError regression_city(no_log, (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x]))
     end
  
+    @testset "regression_city with reference_levels" begin
+        # 1. made-up listings with three categories whose prices differ by category
+        df = DataFrame(
+            cat = repeat(["A", "B", "C"], 4),
+            price = [10.0, 20.0, 30.0, 11.0, 21.0, 31.0, 12.0, 22.0, 32.0, 10.5, 20.5, 30.5],
+        )
+        spec = (target = :price, log_scale = false, log1p_predictors = Symbol[], predictors = [:cat])
+
+        # 2. without the keyword nothing changes: the first category "A" is the base and has no coefficient
+        fit = P.regression_city(df, spec)
+        @test P.coefnames(fit.model) == ["(Intercept)", "cat: B", "cat: C"]
+
+        # 3. a given category becomes the base: "B" has no coefficient, "A" and "C" have one
+        fit_b = P.regression_city(df, spec; reference_levels = Dict(:cat => "B"))
+        @test P.coefnames(fit_b.model) == ["(Intercept)", "cat: A", "cat: C"]
+
+        # 4. :most_common takes the category with the most rows as the base
+        # "C" has 7 rows, "B" 3 and "A" 2, so "C" has no coefficient
+        df_common = DataFrame(
+            cat = ["A", "A", "B", "B", "B", "C", "C", "C", "C", "C", "C", "C"],
+            price = [10.0, 11.0, 20.0, 21.0, 22.0, 30.0, 31.0, 32.0, 33.0, 34.0, 35.0, 36.0],
+        )
+        fit_common = P.regression_city(df_common, spec; reference_levels = Dict(:cat => :most_common))
+        @test P.coefnames(fit_common.model) == ["(Intercept)", "cat: A", "cat: B"]
+
+        # 5. the base only changes how the coefficients are read, the predictions stay the same
+        @test P.predict_apartment_performance(fit_b, df) ≈ P.predict_apartment_performance(fit, df)
+
+        # 6. a column in reference_levels that is not a predictor of this model is ignored
+        fit_other = P.regression_city(df, spec; reference_levels = Dict(:room_type => "X"))
+        @test P.coefnames(fit_other.model) == ["(Intercept)", "cat: B", "cat: C"]
+    end
+
      @testset "get_r2" begin
         
         # real values vector
