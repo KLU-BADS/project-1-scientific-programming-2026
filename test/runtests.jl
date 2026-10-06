@@ -709,7 +709,7 @@ const P = Project1
     end
  
     @testset "calculate_ratio!" begin
-        col_col_rule = only(filter(r -> r.target == :ratio_beds_bedrooms, P.CONFIG.ratio_rules))
+        col_col_rule = (target = :ratio_beds_bedrooms, numerator = :beds, denominator = :bedrooms, delete = false)
         col_fixnum_rule = only(filter(r -> r.target == :occupancy_rate, P.CONFIG.ratio_rules))
 
         df = DataFrame(beds = [2, 3], bedrooms = [1, 2])
@@ -743,10 +743,10 @@ const P = Project1
 
         df = DataFrame(beds = [2, 3], bedrooms = [1, 0])
         @test_throws ErrorException P.calculate_ratio!(df, col_col_rule)
+
         # - column / column and column / fixed number (365)
         # - delete = true removes the source columns
         # - a 0 or a missing value in the denominator throws an ErrorException
-        #@test_broken false
     end
  
     @testset "calculate_distance!" begin
