@@ -833,7 +833,7 @@ const P = Project1
        
         @test P.square_center(df_2, rule_2) ≈ 7/3
 
-        # 3. add test to check if the MissingException is thrown
+        # 6. add test to check if the MissingException is thrown
         df_3 = DataFrame(accommodates = [2, missing, 6])
         @test_throws MissingException P.square_center(df_3, rule)
     end 

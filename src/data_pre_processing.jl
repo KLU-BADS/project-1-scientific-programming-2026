@@ -963,9 +963,7 @@ function calculate_square!(df::DataFrame, rule::NamedTuple, center::Real)
     # 1. Get source column
     values = df[!, rule.source]
     # 2. Check for missing values 
-    if any(ismissing, values)
-        error("Value is missing in column $(rule.source)")
-    end
+    any(ismissing, values) && throw(MissingException("column $(rule.source) contains missing values"))
     # 3. Compute Squared Values 
     result = values .- center 
     squared_result = result .^2
