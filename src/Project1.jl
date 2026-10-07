@@ -11,6 +11,7 @@ include("data_import.jl")
 include("data_pre_processing.jl")
 include("data_analysis.jl")
 include("user_interface.jl")
+include("visualization.jl")
 include("pipeline.jl")
 
 # Functions to be exported

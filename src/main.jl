@@ -17,8 +17,8 @@ Returns `nothing`.
 <!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
 function main()
-    #df_processed = run_training_pipeline()
-    #analysis = run_analysis_pipeline(df_processed)
+    #result = run_training_pipeline()
+    #analysis = run_analysis_pipeline(result.df)
 end
 
 

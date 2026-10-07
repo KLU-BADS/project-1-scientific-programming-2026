@@ -158,7 +158,7 @@ function prepare_dependent(df::DataFrame, spec::NamedTuple)
 end
 
 """
-    regression_city(df_training, spec) -> (spec, model, smearing)
+    regression_city(df_training, spec; reference_levels = Dict{Symbol,Any}()) -> (spec, model, smearing)
 
 Fit one linear model. `spec` is one entry of `CONFIG.regression_models` with the fields `target`, `log_scale`,
 `log1p_predictors` and `predictors`.
@@ -166,6 +166,9 @@ Fit one linear model. `spec` is one entry of `CONFIG.regression_models` with the
 # Arguments
 - `df_training::DataFrame`:     Training data.
 - `spec::NamedTuple`:           Regression specification
+- `reference_levels`:           Optional Dict `column => reference category` (the base of a categorical predictor, without its own coefficient),
+                                or `:most_common` for the category with the most rows. Columns that are not predictors of `spec` are ignored.
+                                The default is an empty Dict: the first category is the base.
 
 # Throws
 - `MissingException` if the target or a predictor column contains missing values.
@@ -193,7 +196,7 @@ julia> fit.smearing ≈ 1.0
 true
 ```
 """
-function regression_city(df_training::DataFrame, spec::NamedTuple)
+function regression_city(df_training::DataFrame, spec::NamedTuple; reference_levels = Dict{Symbol,Any}())
     # check target and predictor columns for missing values
     for check_col in vcat(spec.target, spec.predictors)
         any(ismissing, df_training[!, check_col]) && throw(MissingException("column $(check_col) contains missing values"))
@@ -206,8 +209,25 @@ function regression_city(df_training::DataFrame, spec::NamedTuple)
     else
         dependent = spec.target
     end
+    # 1. the reference (base) category of each categorical predictor
+    # the contrasts tell the model which category is the base, so it gets no coefficient of its own
+    contrasts = Dict{Symbol,Any}()
+    for (col, level) in reference_levels
+        # 2. a column that is not a predictor of this model is ignored
+        col in spec.predictors || continue
+        # 3. :most_common means the category with the most rows, otherwise the given category is the base
+        if level === :most_common
+            counts = combine(groupby(df_training, col), nrow => :n)
+            base = counts[argmax(counts.n), col]
+        else
+            base = level
+        end
+        # 4. DummyCoding with this base is passed to lm below
+        contrasts[col] = DummyCoding(base = base)
+    end
     # define model
-    model = lm(Term(dependent) ~ sum(term.(spec.predictors)), data)
+    # with an empty contrasts Dict the fit is the same as before
+    model = lm(Term(dependent) ~ sum(term.(spec.predictors)), data; contrasts = contrasts)
     # set Duan's smearing factor, responsible for getting the mean if dependent is log scale, as 1.0 for the return in case of no log-scale
     smearing = 1.0
     # exp(prediction) is the median of the dependent variable, not its mean; Duan's smearing factor corrects this (mean of exp(residuals))
