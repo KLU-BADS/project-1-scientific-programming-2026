@@ -1234,6 +1234,33 @@ const P = Project1
         @test_throws "available names: :a, :b" P.get_fit(fits, :c)
     end
 
+    @testset "group_importance" begin
+        # 1. made-up data: log(price) depends on x only, kind is a category without any effect
+        # x and kind are balanced (every combination appears twice), so kind cannot explain any part of the price
+        df = DataFrame(x = Float64.(repeat(1:6, 10)), kind = repeat(["a", "b", "c", "d", "e"], 12))
+        df.price = exp.(1.0 .+ 0.5 .* df.x)
+        spec = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x, :kind])
+        groups = ["Noise" => [:kind], "Signal" => [:x]]
+
+        # 2. one row per group, with the columns group and r2_loss
+        result = P.group_importance(df, df, spec, groups)
+        @test names(result) == ["group", "r2_loss"]
+        @test nrow(result) == 2
+
+        # 3. the group that drives the price loses almost all R², the useless group loses nothing
+        # the largest loss comes first, so Signal is listed first although it was given second
+        @test result.group == ["Signal", "Noise"]
+        @test result.r2_loss[1] > 0.9
+        @test abs(result.r2_loss[2]) < 1e-6
+
+        # 4. reference levels are passed on to the fits and do not change the loss
+        with_reference = P.group_importance(df, df, spec, groups; reference_levels = Dict(:kind => "b"))
+        @test with_reference.r2_loss ≈ result.r2_loss
+
+        # 5. the spec that was passed in is not changed by the refits
+        @test spec.predictors == [:x, :kind]
+    end
+
     @testset "get_r2" begin
         
         # real values vector
