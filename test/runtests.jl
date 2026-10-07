@@ -1521,6 +1521,22 @@ const P = Project1
         unknown_amenity = merge(listed, (tips = DataFrame(amenity = [:has_jacuzzi], change = [9.0], change_pct = [9.0]),))
         @test_throws KeyError P.visualize_results(unknown_amenity; io = IOBuffer())
 
+        # 11. edge case: the three statuses not covered above print where the price lies and their own message
+        statuses = [
+            # status                current price   where it lies       start of the message
+            (:underpriced,          50.0,           "below the range",  "probably underpriced"),
+            (:not_price_problem,    50.0,           "below the range",  "cheap but few bookings"),
+            (:unexplained_premium,  150.0,          "above the range",  "guests pay more than the model expects"),
+        ]
+        @testset "status $status" for (status, price, position, message) in statuses
+            bundle = merge(listed, (current_price = price, assessment = (status = status, difference = 16.0)))
+            io = IOBuffer()
+            P.visualize_results(bundle; io = io)
+            output = String(take!(io))
+            @test occursin("Your price $(P.format_eur(price)) is $position", output)
+            @test occursin(message, output)
+        end
+        # @testset ... for runs the same two tests once for every row of the list, each as its own small test set
     end
 
     # ------------------------------------------------------------------------------------------
