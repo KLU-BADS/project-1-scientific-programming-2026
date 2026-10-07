@@ -418,7 +418,7 @@ function predict_price_range(fit::NamedTuple, df_new::DataFrame; level::Real = 0
     predictor_table = prepare_predictors(df_new, fit.spec)
     
     # 2. predict with a prediction interval: a table with columns prediction, lower, and upper 
-    predictions = predict(fit.model, predictor_matrix; interval = :prediction, level = level)
+    predictions = predict(fit.model, predictor_table; interval = :prediction, level = level)
     
     # 3. take the three columns as plain numbers, still on model's scale
     unconverted_prediction = Float64.(predictions.prediction)
