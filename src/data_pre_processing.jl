@@ -565,6 +565,100 @@ function process_outliers!(df::DataFrame, rules::NamedTuple)
 end
 
 """
+    remove_implausible!(df, rules)
+
+Remove rows whose size values are impossible, e.g. 50 bedrooms for 2 guests. A row is kept only if
+`df[i, rule.column] <= rule.factor * df[i, rule.max_of] + rule.offset` holds for every rule.
+Every rule is judged on the full table first, then all flagged rows are removed together.
+An error is raised if a column used in a rule has missing values.
+
+# Arguments
+- `df::DataFrame`:                  Input data frame.
+- `rules::Vector{<:NamedTuple}`:    Rules, each with `column` (the value that is checked), `max_of` (the column that
+                                    sets the limit), `factor` and `offset`.
+
+Returns the modified DataFrame in place.
+"""
+function remove_implausible!(df::DataFrame, rules::Vector{<:NamedTuple})
+    # 1. make a list that remembers for every row if it has to be deleted
+    to_delete = falses(nrow(df))
+    # falses(n) is a list of n times false, one entry per row; false means the row stays for now
+    # rows are only flagged here and deleted at the very end (step 5)
+
+    # 2. check every rule one after another
+    for rule in rules
+        # rules comes from config.jl (CONFIG.plausibility_rules), so no column names are written here
+        # df[!, name] is the whole column with that name
+
+        # 3. stop with a clear message if one of the two columns has empty cells
+        any(ismissing, df[!, rule.column]) && error("remove_implausible!: column :$(rule.column) has a missing value")
+        any(ismissing, df[!, rule.max_of]) && error("remove_implausible!: column :$(rule.max_of) has a missing value")
+        # any(ismissing, x) is true if at least one value in x is missing
+        # cond && error(...) = the error only runs if the condition is true
+        # an empty cell cannot be compared with a number, process_missing! should have removed them before
+
+        # 4. flag every row that breaks the rule
+        for row in 1:nrow(df)
+            limit = rule.factor * df[row, rule.max_of] + rule.offset
+            # the limit of this row, e.g. 1.0 * 2 guests + 0.0 = 2.0 bedrooms at most
+            if df[row, rule.column] > limit
+                to_delete[row] = true
+                # a row above the limit is flagged; a value exactly on the limit stays because we only flag if it is greater
+            end
+        end
+        # 1:nrow(df) goes through every row number
+        # a row flagged by two rules stays flagged once, setting true again changes nothing
+    end
+
+    # 5. delete all flagged rows at once
+    deleteat!(df, findall(to_delete))
+    # findall(to_delete) gives the row numbers where the entry is true, e.g. [3, 7]
+    # deleteat! removes the rows from df itself (in place)
+    # deleting only now means every rule was judged on the full table and the row numbers did not shift in the loop
+
+    # 6. return the table
+    return df
+    # the docstring promises the modified DataFrame, so the pipeline can continue with it
+end
+
+"""
+    compute_caps(df::DataFrame, rule::NamedTuple) -> Dict{Tuple{String,Symbol},Float64}
+
+Compute the upper limit (cap) of each size column for each room type.
+
+The cap is the quantile of the room type's own values, rounded down to a whole number. It is computed on the training data only; the result is saved as `fitted.caps` and reused for the user's input by `cap_values!`.
+
+# Arguments
+- `df::DataFrame`: Cleaned listings table.
+- `rule::NamedTuple`: Cap rule with the fields `columns` (the columns to cap), `group_by` (the column that defines the groups, `:room_type`) and `quantile` (for example 0.995).
+
+Returns a Dict keyed by `(room_type, column)`, e.g. `("Entire home/apt", :accommodates) => 12.0`. The table is not changed.
+"""
+function compute_caps(df::DataFrame, rule::NamedTuple)
+    # 1. the caps are collected in a Dict
+    # the key is (room type, column) and the value is the cap
+    caps = Dict{Tuple{String,Symbol},Float64}()
+
+    # 2. go through the listings of one room type at a time
+    # groupby splits the table into one sub-table per room type
+    for group in groupby(df, rule.group_by)
+        # 3. the room type of this sub-table
+        # all rows of a group have the same value, so the first row is enough
+        room_type = String(group[1, rule.group_by])
+
+        # 4. one cap per column
+        for column in rule.columns
+            # 5. the quantile of the room type's values, rounded down
+            # floor makes the cap a whole number, so an Int column stays an Int column when it is capped
+            caps[(room_type, column)] = floor(quantile(group[!, column], rule.quantile))
+        end
+    end
+
+    # 6. return all caps
+    return caps
+end
+
+"""
     format_dummies!(df, rules)
 
 Create dummy variables for categorical columns according to the configured rules.
@@ -613,7 +707,10 @@ function format_dummies!(df::DataFrame, rules::NamedTuple)
     if rules.delete == true && rules.source != rules.target
         select!(df, Not(rules.source))
         #select = says which columns to keep and Not says which ones to remove, so from df keep everything, but not rule.source
-    end 
+    end
+    # 6. return the table
+    return df
+    # the docstring promises the modified DataFrame, so the pipeline can continue with it
 end
 
 """
@@ -709,3 +806,100 @@ function calculate_distance!(df::DataFrame, rule::NamedTuple, center::NamedTuple
     end
     return df
 end
+
+"""
+    kept_categories(df, rule) -> Vector{String}
+
+Return the categories of the column named in `rule.column` that occur in at least `rule.min_count` rows.
+
+Run once on the training data. The result is saved (as `fitted.kept_districts`) and passed to
+`group_rare_categories!`, both in training and at prediction time, so a user's apartment is
+grouped exactly like the training data. The table itself is not changed.
+
+# Arguments
+- `df::DataFrame`:     The cleaned listings data.
+- `rule::NamedTuple`:  The category rule, e.g. `CONFIG.category_rule`, with the fields
+                       `column` (the column to count, e.g. `:district`) and
+                       `min_count` (the minimum number of rows a category needs to be kept).
+
+Returns the kept category names as a `Vector{String}`, in order of first appearance in `df`.
+
+# Examples
+```jldoctest
+julia> using DataFrames
+
+julia> df = DataFrame(district = ["Plaka", "Plaka", "Plaka", "Kolonaki", "Kolonaki", "Exarchia"]);
+
+julia> rule = (column = :district, min_count = 2, other_label = "_other");
+
+julia> Project1.kept_categories(df, rule)
+2-element Vector{String}:
+ "Plaka"
+ "Kolonaki"
+```
+"""
+function kept_categories(df::DataFrame, rule::NamedTuple)
+    # 1. count the rows per category of the column named in the rule
+    grouped = groupby(df, rule.column)
+    counts = combine(grouped, nrow => :count)
+    # 2. keep only the categories with at least rule.min_count rows
+    kept_rows = counts[counts.count .>= rule.min_count, :]
+    # 3. return their names as a list
+    return String.(kept_rows[!, rule.column])
+end
+
+"""
+    group_rare_categories!(df, rule, kept) -> df
+
+Replace every value of the column named in `rule.column` that is not in `kept` with `rule.other_label`.
+
+Rare categories are pooled into one group, so the regression estimates one effect for them instead
+of unreliable effects from a handful of listings. No rows are removed and no other column is changed.
+
+# Arguments
+- `df::DataFrame`:          The listings data, or the one-row table of a user's apartment.
+- `rule::NamedTuple`:       The category rule, e.g. `CONFIG.category_rule`, with the fields
+                            `column` (the column to group, e.g. `:district`) and
+                            `other_label` (the replacement text, e.g. `"_other"`).
+- `kept::Vector{String}`:   The categories to keep unchanged, as returned by `kept_categories`
+                            on the training data.
+
+Returns the modified DataFrame in place.
+
+# Examples
+```jldoctest
+julia> using DataFrames
+
+julia> df = DataFrame(district = ["Plaka", "Kolonaki", "Exarchia"]);
+
+julia> rule = (column = :district, min_count = 2, other_label = "_other");
+
+julia> Project1.group_rare_categories!(df, rule, ["Plaka", "Kolonaki"]);
+
+julia> df.district
+3-element Vector{String}:
+ "Plaka"
+ "Kolonaki"
+ "_other"
+```
+"""
+function group_rare_categories!(df::DataFrame, rule::NamedTuple, kept::Vector{String})
+    # 1. get the category column named in the rule
+    categories = df[!, rule.column]
+    # 2. for every value: keep it if it is in kept, otherwise replace it with rule.other_label
+    new_values = String[]
+
+    for cat in categories
+        if cat in kept
+            push!(new_values, cat)
+        else
+            push!(new_values, rule.other_label)
+        end
+    end
+    # creates a new list to which either the actual district name $cat is added, or the rule other label (just adds "_Other")
+    # 3. store the new values back in the column
+    df[!, rule.column] = new_values
+    # Assigns elements of new values to the dataframe for all rows in the rule column(s)
+    # 4. give the table back
+    return df
+end 
