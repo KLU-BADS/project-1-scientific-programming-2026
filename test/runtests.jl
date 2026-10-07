@@ -669,6 +669,59 @@ const P = Project1
         # the limit cannot be calculated from an empty cell either
     end
 
+    @testset "input_bounds" begin
+        # 1. made-up training data with two room types
+        df = DataFrame(
+            room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room"],
+            accommodates = [2, 4, 6, 10],
+            bedrooms = [1, 2, 3, 5],
+            beds = [2, 3, 5, 6],
+            bathrooms = [1.0, 1.5, 6.0, 4.0],
+        )
+        entire = Dict(:room_type => "Entire home/apt")
+        no_rules = NamedTuple[]
+        # a rule needs only column, value_type, min and max here; min or max = nothing means "take it from the data"
+
+        # 2. fixed limits are used as they are, the data is not needed
+        rule_fixed = (column = :accommodates, value_type = Int, min = 1, max = 8)
+        @test P.input_bounds(rule_fixed, entire, df, no_rules) == (1, 8)
+
+        # 3. nothing = the smallest and largest value of the chosen room type
+        rule_bedrooms = (column = :bedrooms, value_type = Int, min = nothing, max = nothing)
+        @test P.input_bounds(rule_bedrooms, entire, df, no_rules) == (1, 3)
+        @test P.input_bounds(rule_bedrooms, Dict(:room_type => "Private room"), df, no_rules) == (5, 5)
+
+        # 4. a fixed minimum and a maximum from the data can be mixed
+        rule_guests = (column = :accommodates, value_type = Int, min = 1, max = nothing)
+        @test P.input_bounds(rule_guests, entire, df, no_rules) == (1, 6)
+
+        # 5. a plausibility rule limits the maximum by an earlier answer
+        # only the rules whose column is the question count: the bathrooms question ignores the bedrooms rule
+        rules = [(column = :bathrooms, max_of = :bedrooms,     factor = 1.0, offset = 2.0),
+                 (column = :bedrooms,  max_of = :accommodates, factor = 1.0, offset = 0.0),
+                 (column = :beds,      max_of = :accommodates, factor = 1.5, offset = 0.0)]
+        rule_bathrooms = (column = :bathrooms, value_type = Float64, min = 0.5, max = nothing)
+        # 1 bedroom: at most 1 + 2 = 3 bathrooms, although the data goes up to 6.0
+        @test P.input_bounds(rule_bathrooms, Dict(:room_type => "Entire home/apt", :bedrooms => 1), df, rules) == (0.5, 3.0)
+        # 2 guests: at most 2 bedrooms, although the data goes up to 3
+        @test P.input_bounds(rule_bedrooms, Dict(:room_type => "Entire home/apt", :accommodates => 2), df, rules) == (1, 2)
+
+        # 6. a limit above the data maximum does not raise the maximum
+        @test P.input_bounds(rule_bathrooms, Dict(:room_type => "Entire home/apt", :bedrooms => 10), df, rules) == (0.5, 6.0)
+
+        # 7. whole-number questions are rounded inwards: the minimum up, the maximum down
+        # 3 guests: 1.5 * 3 = 4.5 beds at most, which becomes 4; the minimum 1.2 becomes 2
+        rule_beds = (column = :beds, value_type = Int, min = 1.2, max = nothing)
+        lo, hi = P.input_bounds(rule_beds, Dict(:room_type => "Entire home/apt", :accommodates => 3), df, rules)
+        @test (lo, hi) == (2, 4)
+        @test lo isa Int
+        @test hi isa Int
+
+        # 8. error cases: the earlier answer is missing, or the room type does not exist
+        @test_throws ArgumentError P.input_bounds(rule_bathrooms, entire, df, rules)
+        @test_throws ArgumentError P.input_bounds(rule_bedrooms, Dict(:room_type => "Hotel room"), df, no_rules)
+    end
+
     @testset "compute_caps" begin
         # 1. the cap rule, written here so the test does not depend on CONFIG
         # the quantile is 0.75 instead of 0.995 so that the expected caps are easy to count by hand; the code is the same
@@ -1215,7 +1268,53 @@ const P = Project1
         @test P.coefnames(fit_other.model) == ["(Intercept)", "cat: B", "cat: C"]
     end
 
-     @testset "get_r2" begin
+    @testset "get_fit" begin
+        # 1. two made-up fits, only the name inside the spec matters for get_fit
+        fit_a = (spec = (name = :a,), model = "model a")
+        fit_b = (spec = (name = :b,), model = "model b")
+        fits = [fit_a, fit_b]
+
+        # 2. a fit is found by its name, not by its position
+        @test P.get_fit(fits, :a) === fit_a
+        @test P.get_fit(fits, :b) === fit_b
+        @test P.get_fit(reverse(fits), :b) === fit_b
+        # the order of the list does not matter
+
+        # 3. error case: a name that does not exist
+        @test_throws ArgumentError P.get_fit(fits, :c)
+
+        # 4. the error message lists the available names
+        @test_throws "available names: :a, :b" P.get_fit(fits, :c)
+    end
+
+    @testset "group_importance" begin
+        # 1. made-up data: log(price) depends on x only, kind is a category without any effect
+        # x and kind are balanced (every combination appears twice), so kind cannot explain any part of the price
+        df = DataFrame(x = Float64.(repeat(1:6, 10)), kind = repeat(["a", "b", "c", "d", "e"], 12))
+        df.price = exp.(1.0 .+ 0.5 .* df.x)
+        spec = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x, :kind])
+        groups = ["Noise" => [:kind], "Signal" => [:x]]
+
+        # 2. one row per group, with the columns group and r2_loss
+        result = P.group_importance(df, df, spec, groups)
+        @test names(result) == ["group", "r2_loss"]
+        @test nrow(result) == 2
+
+        # 3. the group that drives the price loses almost all R², the useless group loses nothing
+        # the largest loss comes first, so Signal is listed first although it was given second
+        @test result.group == ["Signal", "Noise"]
+        @test result.r2_loss[1] > 0.9
+        @test abs(result.r2_loss[2]) < 1e-6
+
+        # 4. reference levels are passed on to the fits and do not change the loss
+        with_reference = P.group_importance(df, df, spec, groups; reference_levels = Dict(:kind => "b"))
+        @test with_reference.r2_loss ≈ result.r2_loss
+
+        # 5. the spec that was passed in is not changed by the refits
+        @test spec.predictors == [:x, :kind]
+    end
+
+    @testset "get_r2" begin
         
         # real values vector
         y1 = [1, 2, 3, 4]
@@ -1251,7 +1350,60 @@ const P = Project1
         # test if function throws error for missing values
         y_hat = [4, missing, 2, 1]
         @test_throws MissingException P.get_r2(y1,y_hat) 
-     end
+    end
+
+    @testset "assess_listing" begin 
+        lower = 66.0
+        upper = 140.0
+        reference = 0.6
+        cases = [
+            # status                current   occupancy   expected difference
+            (:underpriced,          50.0,     0.8,        16.0),     # below the range, well booked
+            (:not_price_problem,    50.0,     0.3,        16.0),     # below the range, rarely booked
+            (:in_line,              100.0,    0.8,        0.0),      # inside the range
+            (:overpriced,           160.0,    0.3,        20.0),     # above the range, rarely booked
+            (:unexplained_premium,  160.0,    0.8,        20.0),     # above the range, well booked
+            (:in_line,              66.0,     0.3,        0.0),      # exactly on the lower bound counts as inside
+            (:in_line,              140.0,    0.8,        0.0),      # exactly on the upper bound counts as inside
+        ]
+
+        for (expected_status, current, occupancy, expected_difference) in cases
+            result = P.assess_listing(current, lower, upper, occupancy, reference)
+            @test result.status == expected_status
+            @test result.difference == expected_difference
+        end 
+
+    end
+    @testset "occupancy_reference" begin
+        # 1. made-up listings: district A has 20 entire homes, B has 3, and A has 2 private rooms
+        df = DataFrame(
+            district = vcat(fill("A", 20), fill("B", 3), fill("A", 2)),
+            room_type = vcat(fill("Entire home/apt", 23), fill("Private room", 2)),
+            occupancy_rate = vcat(collect(1:20) ./ 100, [0.5, 0.6, 0.7], [0.3, 0.4]),
+        )
+        rule = (group_by = [:district, :room_type], min_count = 20, fallback = :room_type, high_quantile = 0.5)
+
+        # 2. a group with exactly min_count listings uses its own median
+        # the median of 0.01 ... 0.20 is (0.10 + 0.11) / 2
+        @test P.occupancy_reference(df, "A", "Entire home/apt", rule) ≈ 0.105
+
+        # 3. a group with fewer listings falls back to the median of the room type (all 23 entire homes)
+        @test P.occupancy_reference(df, "B", "Entire home/apt", rule) ≈ 0.12
+
+        # 4. a district that does not exist falls back in the same way
+        @test P.occupancy_reference(df, "Z", "Entire home/apt", rule) ≈ 0.12
+
+        # 5. q chooses the quantile: 0.75 gives a higher value than the median
+        high = P.occupancy_reference(df, "A", "Entire home/apt", rule; q = 0.75)
+        @test high ≈ 0.1525
+        @test high > P.occupancy_reference(df, "A", "Entire home/apt", rule)
+
+        # 6. the result is a plain Float64
+        @test P.occupancy_reference(df, "A", "Entire home/apt", rule) isa Float64
+
+        # 7. error case: no listings with this room type at all
+        @test_throws ArgumentError P.occupancy_reference(df, "A", "Hotel room", rule)
+    end
 
     # ------------------------------------------------------------------------------------------
     # visualization.jl

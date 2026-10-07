@@ -236,6 +236,37 @@ function regression_city(df_training::DataFrame, spec::NamedTuple; reference_lev
     return (spec = spec, model = model, smearing = smearing)
 end
 
+"""
+    get_fit(fits::AbstractVector, name::Symbol) -> NamedTuple
+
+Find a fitted model by its name.
+
+Each fit is the result of `regression_city()` and carries its spec, including the `name` from `CONFIG.regression_models`. Looking a model up by name keeps working when someone reorders the models; `fits[1]` would silently pick the wrong one.
+
+# Arguments
+- `fits::AbstractVector`:   Fits, the `fits` part of the result of `run_analysis_pipeline`.
+- `name::Symbol`:           Name of the model, e.g. `:price`.
+
+# Throws
+- `ArgumentError` if no fit has this name; the message lists the available names.
+
+Returns the fit with this name.
+"""
+function get_fit(fits::AbstractVector, name::Symbol)
+    # 1. the position of the first fit with this name
+    # every fit carries its spec, and the spec carries the name
+    i = findfirst(fit -> fit.spec.name == name, fits)
+
+    # 2. a name that does not exist is an error
+    # listing the available names helps to find a typo
+    if i === nothing
+        available = join([":" * string(fit.spec.name) for fit in fits], ", ")
+        throw(ArgumentError("no fit named :$name, available names: $available"))
+    end
+
+    # 3. return the fit
+    return fits[i]
+end
 
 """
     predict_apartment_performance(fit, df_new) -> Vector
@@ -345,6 +376,45 @@ function evaluate_regression(fit::NamedTuple, df_test::DataFrame)
     return (n = length(actual), r2_model_scale = r2_model_scale, r2 = r2, median_ae = median(errors), mae = mean(errors))
 end
 
+"""
+    group_importance(df_training, df_test, spec, groups; reference_levels = Dict{Symbol,Any}()) -> DataFrame
+
+How much each group of predictors matters for the model.
+
+The full model is fitted once. For every group it is fitted again without the columns of that group, and the R² (on the model scale, i.e. of the log price for a log model) that is lost on the test set is reported. A large loss means that the group matters. This is more honest than single coefficients, which split credit between related variables and cannot show a categorical variable like the district at all.
+
+# Arguments
+- `df_training::DataFrame`:             Training data, the models are fitted on it.
+- `df_test::DataFrame`:                 Test data, the R² is measured on it.
+- `spec::NamedTuple`:                   Regression specification of the full model, e.g. the `:price` entry of `CONFIG.regression_models`.
+- `groups::AbstractVector{<:Pair}`:     Groups as `name => columns`, e.g. `CONFIG.importance_groups`.
+- `reference_levels`:                   Reference categories, passed on to [`regression_city`](@ref).
+
+Returns a DataFrame with one row per group and the columns `group` (its name) and `r2_loss`, the largest loss first. A group that does not help can have a tiny negative loss.
+"""
+function group_importance(df_training::DataFrame, df_test::DataFrame, spec::NamedTuple, groups::AbstractVector{<:Pair}; reference_levels = Dict{Symbol,Any}())
+    # 1. the R² of the full model on the test set
+    # r2_model_scale is the R² of the log price for a log model, the scale the model is fitted on
+    full_fit = regression_city(df_training, spec; reference_levels = reference_levels)
+    full_r2 = evaluate_regression(full_fit, df_test).r2_model_scale
+
+    # 2. fit the model again without each group and note the R² that is lost
+    group_names = String[]
+    losses = Float64[]
+    for (name, columns) in groups
+        # setdiff removes the columns of the group from the predictors, merge builds a copy of the spec, spec itself stays unchanged (test 5)
+        reduced_spec = merge(spec, (predictors = setdiff(spec.predictors, columns), log1p_predictors = setdiff(spec.log1p_predictors, columns)))
+        reduced_fit = regression_city(df_training, reduced_spec; reference_levels = reference_levels)
+        reduced_r2 = evaluate_regression(reduced_fit, df_test).r2_model_scale
+        # the loss is how much worse the model gets without the group
+        push!(group_names, String(name))
+        push!(losses, full_r2 - reduced_r2)
+    end
+
+    # 3. one row per group, the largest loss first
+    result = DataFrame(group = group_names, r2_loss = losses)
+    return sort(result, :r2_loss; rev = true)
+end
 
 """
     get_r2(y, y_hat) -> r2
@@ -392,3 +462,143 @@ function get_r2(y::AbstractVector, y_hat::AbstractVector)
     # return R-squared
     return 1 - sum((y .- y_hat) .^2) / sum((y .- mean(y)) .^2)
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"""
+    occupancy_reference(df_training::DataFrame, district::AbstractString, room_type::AbstractString, rule::NamedTuple; q::Real = 0.5) -> Float64
+
+Occupancy rate of comparable listings in the training data.
+
+Comparable means the same district and the same room type. If there are fewer than `rule.min_count` such listings, all listings of the same room type are used instead. The value is used for the revenue of a new apartment (median, `q = 0.5`) and as the yardstick for "high occupancy" (`q = rule.high_quantile`).
+
+# Arguments
+- `df_training::DataFrame`:     Training data with the columns `district`, `room_type` and `occupancy_rate`.
+- `district::AbstractString`:   District of the apartment.
+- `room_type::AbstractString`:  Room type of the apartment.
+- `rule::NamedTuple`:           `CONFIG.occupancy_rule`; `min_count` is the smallest group that is used on its own.
+- `q::Real`:                    Quantile to return, 0.5 is the median.
+
+# Throws
+- `ArgumentError` if the training data has no listing with this room type.
+
+Returns the occupancy rate as a `Float64`.
+"""
+function occupancy_reference(df_training::DataFrame, district::AbstractString, room_type::AbstractString, rule::NamedTuple; q::Real = 0.5)
+    # 1. the listings with the same district and room type
+    # .== compares every row with the value, & keeps the rows where both comparisons are true
+    rows = df_training[(df_training.district .== district) .& (df_training.room_type .== room_type), :]
+
+    # 2. too few listings: use all listings of the same room type
+    # a group with exactly min_count rows is still used on its own (test 2)
+    if nrow(rows) < rule.min_count
+        rows = df_training[df_training.room_type .== room_type, :]
+    end
+
+    # 3. a room type that does not exist is an error
+    # without this check quantile would stop with a less helpful message
+    if nrow(rows) == 0
+        throw(ArgumentError("no listings with room type \"$room_type\""))
+    end
+
+    # 4. the quantile of the occupancy rate, q = 0.5 is the median
+    return Float64(quantile(rows.occupancy_rate, q))
+end
+
+"""
+    assess_listing(current::Real, lower::Real, upper::Real, occupancy::Real, reference::Real) -> NamedTuple
+
+Compare the current price of a listed apartment with its predicted price range.
+
+A price below the range means something different for a fully booked apartment (there is room
+to raise it) than for an empty one (the problem is elsewhere), so the occupancy is compared with
+the "high" occupancy of comparable listings. A price exactly on a bound counts as inside the range.
+
+# Arguments
+- `current::Real`:   The current price per night, in euros.
+- `lower::Real`:     Lower end of the price range from `predict_price_range`.
+- `upper::Real`:     Upper end of the price range from `predict_price_range`.
+- `occupancy::Real`: The listing's occupancy rate, booked nights divided by 365.
+- `reference::Real`: The "high" occupancy threshold of comparable listings.
+
+Returns `(status, difference)`: `status` is one of `:underpriced`, `:not_price_problem`, `:in_line`,
+`:overpriced` or `:unexplained_premium`, and `difference` is the distance to the nearest bound in
+euros, 0 inside the range.
+"""
+function assess_listing(current::Real, lower::Real, upper::Real, occupancy::Real, reference::Real)
+    # 1. below range, well-booked apartment could charge more, an empty one has another problem 
+    if current < lower 
+        if occupancy >= reference 
+            status = :underpriced
+        else
+            status = :not_price_problem
+        end
+        difference = lower - current 
+        return (status = status, difference = difference) 
+    end
+    # 2. above range, well-booked apartment has an unexplained premium, an empty one is overpriced
+    if current > upper 
+        if occupancy >= reference 
+            status = :unexplained_premium 
+        else 
+            status = :overpriced
+        end
+        difference = current - upper
+        return (status = status, difference = difference)
+    end 
+    # 3. inside range, appropriate pricing
+    status = :in_line
+    difference = 0.0
+    return (status = status, difference = difference)
+end 
