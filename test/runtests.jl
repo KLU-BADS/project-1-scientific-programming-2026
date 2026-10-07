@@ -1428,6 +1428,44 @@ const P = Project1
         @test_throws ArgumentError P.plot_predicted_vs_actual(Float64[], Float64[]; io = IOBuffer())
     end
 
+    @testset "visualize_results" begin
+        # a made-up bundle for a listed apartment that is priced above its range
+        listed = (
+            group = :listed,
+            level = 0.8,
+            price = (median = 96.0, mean = 101.0, lower = 66.0, upper = 140.0),
+            nights = 72.0,
+            revenue = (estimate = 7272.0, lower = 4752.0, upper = 10080.0),
+            current_price = 150.0,
+            assessment = (status = :overpriced, difference = 10.0),
+            district = "Koukaki",
+            room_type = "Entire home/apt",
+            tips = DataFrame(amenity = [:has_AC], change = [7.5], change_pct = [7.8]),
+            rating_tips = DataFrame(score = [:review_scores_cleanliness], pct_per_step = [1.3]),
+        )
+        # the same apartment as a new one: no current price, no assessment, no revenue range
+        new = merge(listed, (group = :new, current_price = nothing, assessment = nothing,
+                             revenue = (estimate = 7272.0, lower = nothing, upper = nothing)))
+        # merge copies the bundle and replaces only the fields given in the second NamedTuple
+
+        # 1. happy path: a listed apartment shows its header, the typical price and the range with ▲
+        io = IOBuffer()
+        result = P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("YOUR LISTING · Koukaki, Entire home/apt", output)
+        @test occursin("Typical price for comparable listings   €96", output)
+        @test occursin("Range (8 of 10 comparable)   €66 to €140", output)
+        @test occursin("▲", output)
+        @test result === nothing
+
+        # 2. edge case: a new apartment has another header and no ▲, because it has no current price
+        io = IOBuffer()
+        P.visualize_results(new; io = io)
+        output = String(take!(io))
+        @test occursin("NEW LISTING", output)
+        @test !occursin("▲", output)
+    end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------

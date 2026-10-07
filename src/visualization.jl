@@ -234,3 +234,39 @@ function plot_predicted_vs_actual(actual::AbstractVector, predicted::AbstractVec
 
     return nothing
 end
+
+"""
+    visualize_results(result; io = stdout)
+
+Print the result screen for one apartment: the typical price and its range, for a listed apartment
+the assessment of its current price, the expected revenue, and tips to raise the price.
+
+# Arguments
+- `result::NamedTuple`: The bundle from `run_prediction_pipeline` with the fields `group` (`:new` or `:listed`),
+                        `level`, `price` (`median`, `mean`, `lower`, `upper`), `nights`, `revenue`
+                        (`estimate`, `lower`, `upper`), `current_price`, `assessment` (`status`, `difference`),
+                        `district`, `room_type`, `tips` and `rating_tips`.
+- `io::IO`:             Where the screen is printed (default `stdout`, the terminal).
+
+Returns `nothing`, the screen is only printed.
+"""
+function visualize_results(result::NamedTuple; io::IO = stdout)
+    # 1. header: a listed or a new apartment, then where it is and what kind of place it is
+    title = result.group == :listed ? "YOUR LISTING" : "NEW LISTING"
+    # cond ? a : b = a if the condition is true, otherwise b (a short if-else in one line)
+    printstyled(io, "$title · $(result.district), $(result.room_type)\n"; bold = true)
+    println(io, "─"^50)
+    # "─"^50 repeats the line character 50 times, a string to the power n means n copies
+
+    # 2. the typical price: the median of comparable listings
+    println(io, "Typical price for comparable listings   ", format_eur(result.price.median))
+
+    # 3. the range: level 0.8 means 8 of 10 comparable listings lie inside it
+    shown = round(Int, result.level * 10)
+    println(io, "Range ($shown of 10 comparable)   ", format_eur(result.price.lower), " to ", format_eur(result.price.upper))
+    println(io, "  ", range_bar(result.price.lower, result.price.upper, result.price.median; current = result.current_price))
+    # for a new apartment current_price is nothing, so range_bar draws no ▲
+    println(io)
+
+    return nothing
+end
