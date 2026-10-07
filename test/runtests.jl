@@ -1234,6 +1234,33 @@ const P = Project1
         @test_throws "available names: :a, :b" P.get_fit(fits, :c)
     end
 
+    @testset "group_importance" begin
+        # 1. made-up data: log(price) depends on x only, kind is a category without any effect
+        # x and kind are balanced (every combination appears twice), so kind cannot explain any part of the price
+        df = DataFrame(x = Float64.(repeat(1:6, 10)), kind = repeat(["a", "b", "c", "d", "e"], 12))
+        df.price = exp.(1.0 .+ 0.5 .* df.x)
+        spec = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x, :kind])
+        groups = ["Noise" => [:kind], "Signal" => [:x]]
+
+        # 2. one row per group, with the columns group and r2_loss
+        result = P.group_importance(df, df, spec, groups)
+        @test names(result) == ["group", "r2_loss"]
+        @test nrow(result) == 2
+
+        # 3. the group that drives the price loses almost all R², the useless group loses nothing
+        # the largest loss comes first, so Signal is listed first although it was given second
+        @test result.group == ["Signal", "Noise"]
+        @test result.r2_loss[1] > 0.9
+        @test abs(result.r2_loss[2]) < 1e-6
+
+        # 4. reference levels are passed on to the fits and do not change the loss
+        with_reference = P.group_importance(df, df, spec, groups; reference_levels = Dict(:kind => "b"))
+        @test with_reference.r2_loss ≈ result.r2_loss
+
+        # 5. the spec that was passed in is not changed by the refits
+        @test spec.predictors == [:x, :kind]
+    end
+
     @testset "get_r2" begin
         
         # real values vector
@@ -1294,6 +1321,37 @@ const P = Project1
         end 
 
     end
+    @testset "occupancy_reference" begin
+        # 1. made-up listings: district A has 20 entire homes, B has 3, and A has 2 private rooms
+        df = DataFrame(
+            district = vcat(fill("A", 20), fill("B", 3), fill("A", 2)),
+            room_type = vcat(fill("Entire home/apt", 23), fill("Private room", 2)),
+            occupancy_rate = vcat(collect(1:20) ./ 100, [0.5, 0.6, 0.7], [0.3, 0.4]),
+        )
+        rule = (group_by = [:district, :room_type], min_count = 20, fallback = :room_type, high_quantile = 0.5)
+
+        # 2. a group with exactly min_count listings uses its own median
+        # the median of 0.01 ... 0.20 is (0.10 + 0.11) / 2
+        @test P.occupancy_reference(df, "A", "Entire home/apt", rule) ≈ 0.105
+
+        # 3. a group with fewer listings falls back to the median of the room type (all 23 entire homes)
+        @test P.occupancy_reference(df, "B", "Entire home/apt", rule) ≈ 0.12
+
+        # 4. a district that does not exist falls back in the same way
+        @test P.occupancy_reference(df, "Z", "Entire home/apt", rule) ≈ 0.12
+
+        # 5. q chooses the quantile: 0.75 gives a higher value than the median
+        high = P.occupancy_reference(df, "A", "Entire home/apt", rule; q = 0.75)
+        @test high ≈ 0.1525
+        @test high > P.occupancy_reference(df, "A", "Entire home/apt", rule)
+
+        # 6. the result is a plain Float64
+        @test P.occupancy_reference(df, "A", "Entire home/apt", rule) isa Float64
+
+        # 7. error case: no listings with this room type at all
+        @test_throws ArgumentError P.occupancy_reference(df, "A", "Hotel room", rule)
+    end
+
     # ------------------------------------------------------------------------------------------
     # visualization.jl
     # ------------------------------------------------------------------------------------------
@@ -1602,7 +1660,35 @@ const P = Project1
     # ------------------------------------------------------------------------------------------
     # user_interface.jl
     # ------------------------------------------------------------------------------------------
- 
+    @testset "ask_choice" begin
+        # The menu itself needs a real terminal and is tested by hand:
+        # pick an item, pick "Exit", press q, press Ctrl-C (the last three must give nothing).
+
+        # 1. an empty list of options is refused before the menu is shown
+        @test_throws ArgumentError P.ask_choice("Menu", Pair{String,Symbol}[])
+
+        # 2. labels that are not text are refused
+        @test_throws ArgumentError P.ask_choice("Menu", [1 => :new, 2 => :listed])
+
+        # 3. plain texts instead of pairs do not match the signature
+        @test_throws MethodError P.ask_choice("Menu", ["New", "Listed"])
+    end
+
+    @testset "ask_multiple" begin
+        # The menu itself needs a real terminal and is tested by hand:
+        # tick two items and press d, tick nothing and press d, press q
+        # (the last two must give an empty list).
+
+        # 1. an empty list of options is refused before the menu is shown
+        @test_throws ArgumentError P.ask_multiple("Amenities", Pair{String,Symbol}[])
+
+        # 2. labels that are not text are refused
+        @test_throws ArgumentError P.ask_multiple("Amenities", [1 => :has_AC, 2 => :has_tv])
+
+        # 3. plain texts instead of pairs do not match the signature
+        @test_throws MethodError P.ask_multiple("Amenities", ["AC", "TV"])
+    end
+
     @testset "ask_number" begin
         # IOBuffer("4\n") simulates user input of 4 and pressed Enter
         # ("abc\n5\n") represents several consecutive inputs, one after the other.
@@ -1761,6 +1847,50 @@ const P = Project1
         user_input = IOBuffer("maybe\n")                # only one invalid answer, then nothing more
         printed = IOBuffer()
         @test isnothing(P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed))
+    end
+
+    @testset "ask_location" begin
+        # tiny training area around a made-up center: latitude 37.96-38.00, longitude 23.71-23.75,
+        # largest distance 2.5 km (the distances are made up, only their maximum is used)
+        df = DataFrame(latitude = [37.96, 38.00, 37.98], longitude = [23.71, 23.75, 23.73],
+                       proximity_city_center = [2.5, 2.5, 0.0])
+        rule = (target = :proximity_city_center, source_columns = (latitude = :latitude, longitude = :longitude), delete = false)
+        center = (latitude = 37.98, longitude = 23.73)
+        no_margin = (coordinate_margin_deg = 0.0, distance_margin_km = 0.0)
+
+        # 1. the city center is returned as entered
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("37.98\n23.73\n"), io_out = IOBuffer()) ==
+              (latitude = 37.98, longitude = 23.73)
+
+        # 2. a training extreme itself is accepted (limits are inclusive); 38.00, 23.73 is 2.22 km away
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.0\n23.73\n"), io_out = IOBuffer()) ==
+              (latitude = 38.0, longitude = 23.73)
+
+        # 3. a latitude outside the training extremes is refused, then a valid one is accepted
+        out = IOBuffer()
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.1\n37.99\n23.73\n"), io_out = out) ==
+              (latitude = 37.99, longitude = 23.73)
+        @test occursin("between", String(take!(out)))
+
+        # 4. the corner 38.00, 23.75 is inside both extremes but 2.83 km away: refused once, then a valid point
+        out = IOBuffer()
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.0\n23.75\n37.99\n23.73\n"), io_out = out) ==
+              (latitude = 37.99, longitude = 23.73)
+        @test occursin("outside the area", String(take!(out)))
+
+        # 5. with a distance margin of 0.5 km (limit 3.0 km) the same corner is accepted
+        @test P.ask_location(df, rule, (coordinate_margin_deg = 0.0, distance_margin_km = 0.5), center;
+                             io_in = IOBuffer("38.0\n23.75\n"), io_out = IOBuffer()) == (latitude = 38.0, longitude = 23.75)
+
+        # 6. a latitude just outside the extremes (38.005) is accepted only with a coordinate margin
+        @test P.ask_location(df, rule, (coordinate_margin_deg = 0.01, distance_margin_km = 0.5), center;
+                             io_in = IOBuffer("38.005\n23.73\n"), io_out = IOBuffer()) == (latitude = 38.005, longitude = 23.73)
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.005\n"), io_out = IOBuffer()))
+
+        # 7. exit at either question, or input that ends, gives nothing
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("q\n"), io_out = IOBuffer()))
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("37.99\nexit\n"), io_out = IOBuffer()))
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer(""), io_out = IOBuffer()))
     end
 end
  

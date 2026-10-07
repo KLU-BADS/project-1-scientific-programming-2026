@@ -15,37 +15,88 @@ function gui()
 end
 
 """
-    ask_choice() -> Int
+    ask_choice(title, options) -> value or nothing
 
-User interface in REPL allowing a user to select a single choice from a menu.
+Show a menu in the terminal and let the user pick one item. An "Exit" item is always
+added as the last item, so callers do not include it themselves.
 
 # Arguments
-- `title::String`:          title of the menu.
-- options::Vector{String}:  menu items.
+- `title::AbstractString`:              question shown above the menu.
+- `options::AbstractVector{<:Pair}`:    menu items as `label => value` pairs,
+                                        e.g. `["Price a new apartment" => :new, "Check my listed apartment" => :listed]`.
 
+# Throws
+- `ArgumentError`   if `options` is empty or a label is not a text.
+- `MethodError`     if `options` is not a list of pairs, e.g. plain texts.
 
-Returns `index` with the users choice or -1 if user cancels input.
+Returns the value of the chosen pair, or `nothing` if the user chooses "Exit",
+presses `q` or presses Ctrl-C. Callers check the result with `isnothing`.
+
+# Examples
+```jldoctest
+julia> Project1.ask_choice("Menu", Pair{String,Symbol}[])
+ERROR: ArgumentError: options must not be empty
+
+julia> Project1.ask_choice("Menu", [1 => :new, 2 => :listed])
+ERROR: ArgumentError: every option must be a pair label => value with a text label
+```
 """
-function ask_choice(title::String, options::Vector{String}; io_in::IO = stdin, io_out::IO = stdout)
-    # Radio Menu
-    RadioMenu(options; pagesize=-1, charset=:unicode, keybindings=Char[])
+function ask_choice(title::AbstractString, options::AbstractVector{<:Pair})
+    # catch empty options vector
+    isempty(options) && throw(ArgumentError("options must not be empty"))
+    # check wrong structure of options vector
+    all(p -> first(p) isa AbstractString, options) || throw(ArgumentError("every option must be a pair label => value with a text label"))
+    # set labels for RadioMenu options (first add exit option to input options)
+    all_options = vcat(options, ["Exit" => nothing])
+    labels = String.(first.(all_options))
+    # get user input from RadioMenu
+    menu = RadioMenu(labels; pagesize = min(15, length(labels)), charset = :unicode, ctrl_c_interrupt = false)
+    user_selection = request(title, menu)
+    # return nothing if user left the menu or selected exit option, otherwise return value
+    return user_selection == -1 ? nothing : last(all_options[user_selection])
 end
 
 """
-    ask_multiple() -> Set{Int}
+    ask_multiple(title, options) -> Vector
 
-User interface in REPL allowing a user to select multiple options from a menu.
+Show a menu in the terminal in which the user can tick several items.
+Enter ticks or unticks an item, `d` finishes, `q` cancels.
 
 # Arguments
-- `title::String`:          Title of the menu.
-- options::AbstractVector:  Menu items.
+- `title::AbstractString`:              question shown above the menu; mention that `d` finishes,
+                                        e.g. "Amenities (Enter = select, d = done)".
+- `options::AbstractVector{<:Pair}`:    menu items as `label => value` pairs,
+                                        e.g. `["Air conditioning" => :has_AC, "TV" => :has_tv]`.
 
+# Throws
+- `ArgumentError`   if `options` is empty or a label is not a text.
+- `MethodError`     if `options` is not a list of pairs, e.g. plain texts.
 
-Returns `indices` Set{Int} with the users choices (empty if user cancels input).
+Returns the values of all ticked items in menu order, e.g. `[:has_AC, :has_tv]`.
+Returns an empty list if nothing was ticked or the user pressed `q`.
+
+# Examples
+```jldoctest
+julia> Project1.ask_multiple("Amenities", Pair{String,Symbol}[])
+ERROR: ArgumentError: options must not be empty
+
+julia> Project1.ask_multiple("Amenities", [1 => :has_AC, 2 => :has_tv])
+ERROR: ArgumentError: every option must be a pair label => value with a text label
+```
 """
-function ask_multiple(title::String, options::AbstractVector; io_in::IO = stdin, io_out::IO = stdout)
-    # Multi-select menu
-    MultiSelectMenu(options; pagesize=-1, selected=Int[], charset=:unicode)
+function ask_multiple(title::AbstractString, options::AbstractVector{<:Pair})
+    # catch empty options vector
+    isempty(options) && throw(ArgumentError("options must not be empty"))
+    # check wrong structure of options vector
+    all(p -> first(p) isa AbstractString, options) || throw(ArgumentError("every option must be a pair label => value with a text label"))
+    # set labels for MultiSelectMenu options (first add exit option to input options)
+    labels = String.(first.(options))
+    # get user input from MultiSelectMenu and sort it
+    menu = MultiSelectMenu(labels; charset = :unicode, ctrl_c_interrupt = false)
+    user_selection = request(title, menu)
+    sorted_user_selection = sort(collect(user_selection))
+    # return all selected menu items
+    return [last(options[i]) for i in sorted_user_selection]
 end
 
 """
@@ -138,4 +189,63 @@ function ask_yes_no(prompt::AbstractString; io_in::IO = stdin, io_out::IO = stdo
     end
     # true for a yes-value, false for a no-value
     return answer in yes_values
+end
+
+"""
+    ask_location(df_training, distance_rule, location_rule, center; io_in = stdin, io_out = stdout) -> NamedTuple or nothing
+
+Ask the user for the latitude and longitude of the apartment. Only locations inside the area covered by the
+training data are accepted: each coordinate must lie between the training extremes (widened by a small margin),
+and the distance to the city center must not exceed the largest training distance (plus a small margin).
+Asks again until a valid location is entered.
+
+# Arguments
+- `df_training::DataFrame`:     training data with the columns `latitude`, `longitude` and `proximity_city_center`
+                                (so `calculate_distance!` must have run with `delete = false`).
+- `distance_rule::NamedTuple`:  the distance rule from the config, e.g. `CONFIG.distance_rule`.
+- `location_rule::NamedTuple`:  margins from the config, `(coordinate_margin_deg = …, distance_margin_km = …)`.
+- `center::NamedTuple`:         city center as `(latitude = …, longitude = …)`.
+- `io_in::IO`:                  input stream (default `stdin`); pass an `IOBuffer` in tests.
+- `io_out::IO`:                 output stream for the prompts and messages (default `stdout`).
+
+# Throws
+- `ArgumentError`   if `df_training` has no column `latitude`, `longitude` or `proximity_city_center`.
+
+Returns `(latitude = …, longitude = …)`, or `nothing` if the user enters `q`, `quit` or `exit`
+at either question or the input ends.
+
+# Examples
+```jldoctest
+julia> df = DataFrame(latitude = [37.96, 38.00, 37.98], longitude = [23.71, 23.75, 23.73],
+                      proximity_city_center = [2.5, 2.5, 0.0]);
+
+julia> rule = (target = :proximity_city_center, source_columns = (latitude = :latitude, longitude = :longitude), delete = false);
+
+julia> Project1.ask_location(df, rule, (coordinate_margin_deg = 0.0, distance_margin_km = 0.0), (latitude = 37.98, longitude = 23.73);
+                             io_in = IOBuffer("37.99\\n23.73\\n"), io_out = IOBuffer())
+(latitude = 37.99, longitude = 23.73)
+```
+"""
+function ask_location(df_training::DataFrame, distance_rule::NamedTuple, location_rule::NamedTuple, center::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
+    # get min/max values for latitude/longitude input from the training data and expand by a small margin
+    latitude_min, latitude_max = extrema(df_training.latitude) .+ (-location_rule.coordinate_margin_deg, location_rule.coordinate_margin_deg)
+    longitude_min, longitude_max = extrema(df_training.longitude) .+ (-location_rule.coordinate_margin_deg, location_rule.coordinate_margin_deg)
+    # set maximum distance from city center based on the training data plus a small margin
+    distance_max = maximum(df_training.proximity_city_center) + location_rule.distance_margin_km
+    # get user input with min/max the extrema from the training data plus a small margin, if user exits return nothing
+    while true
+        latitude_input = ask_number("Latitude (e.g. 37.968): ", Float64, latitude_min, latitude_max, true; io_in = io_in, io_out = io_out)
+        isnothing(latitude_input) && return nothing
+        longitude_input = ask_number("Longitude (e.g. 23.727): ", Float64, longitude_min, longitude_max, true; io_in = io_in, io_out = io_out)
+        isnothing(longitude_input) && return nothing
+        # calculate distance to city center and verify validity of the input
+        location = DataFrame(latitude = [latitude_input], longitude = [longitude_input])
+        calculate_distance!(location, merge(distance_rule, (target = :d, delete = false)), center)
+        if location.d[1] > distance_max
+            println(io_out, "This location is outside the area our data covers.")
+            continue
+        end
+        # return values
+        return (latitude = latitude_input, longitude = longitude_input)
+    end
 end

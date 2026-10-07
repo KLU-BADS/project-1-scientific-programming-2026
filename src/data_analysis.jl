@@ -376,6 +376,45 @@ function evaluate_regression(fit::NamedTuple, df_test::DataFrame)
     return (n = length(actual), r2_model_scale = r2_model_scale, r2 = r2, median_ae = median(errors), mae = mean(errors))
 end
 
+"""
+    group_importance(df_training, df_test, spec, groups; reference_levels = Dict{Symbol,Any}()) -> DataFrame
+
+How much each group of predictors matters for the model.
+
+The full model is fitted once. For every group it is fitted again without the columns of that group, and the R² (on the model scale, i.e. of the log price for a log model) that is lost on the test set is reported. A large loss means that the group matters. This is more honest than single coefficients, which split credit between related variables and cannot show a categorical variable like the district at all.
+
+# Arguments
+- `df_training::DataFrame`:             Training data, the models are fitted on it.
+- `df_test::DataFrame`:                 Test data, the R² is measured on it.
+- `spec::NamedTuple`:                   Regression specification of the full model, e.g. the `:price` entry of `CONFIG.regression_models`.
+- `groups::AbstractVector{<:Pair}`:     Groups as `name => columns`, e.g. `CONFIG.importance_groups`.
+- `reference_levels`:                   Reference categories, passed on to [`regression_city`](@ref).
+
+Returns a DataFrame with one row per group and the columns `group` (its name) and `r2_loss`, the largest loss first. A group that does not help can have a tiny negative loss.
+"""
+function group_importance(df_training::DataFrame, df_test::DataFrame, spec::NamedTuple, groups::AbstractVector{<:Pair}; reference_levels = Dict{Symbol,Any}())
+    # 1. the R² of the full model on the test set
+    # r2_model_scale is the R² of the log price for a log model, the scale the model is fitted on
+    full_fit = regression_city(df_training, spec; reference_levels = reference_levels)
+    full_r2 = evaluate_regression(full_fit, df_test).r2_model_scale
+
+    # 2. fit the model again without each group and note the R² that is lost
+    group_names = String[]
+    losses = Float64[]
+    for (name, columns) in groups
+        # setdiff removes the columns of the group from the predictors, merge builds a copy of the spec, spec itself stays unchanged (test 5)
+        reduced_spec = merge(spec, (predictors = setdiff(spec.predictors, columns), log1p_predictors = setdiff(spec.log1p_predictors, columns)))
+        reduced_fit = regression_city(df_training, reduced_spec; reference_levels = reference_levels)
+        reduced_r2 = evaluate_regression(reduced_fit, df_test).r2_model_scale
+        # the loss is how much worse the model gets without the group
+        push!(group_names, String(name))
+        push!(losses, full_r2 - reduced_r2)
+    end
+
+    # 3. one row per group, the largest loss first
+    result = DataFrame(group = group_names, r2_loss = losses)
+    return sort(result, :r2_loss; rev = true)
+end
 
 """
     get_r2(y, y_hat) -> r2
@@ -523,3 +562,42 @@ function assess_listing(current::Real, lower::Real, upper::Real, occupancy::Real
     difference = 0.0
     return (status = status, difference = difference)
 end 
+"""
+    occupancy_reference(df_training::DataFrame, district::AbstractString, room_type::AbstractString, rule::NamedTuple; q::Real = 0.5) -> Float64
+
+Occupancy rate of comparable listings in the training data.
+
+Comparable means the same district and the same room type. If there are fewer than `rule.min_count` such listings, all listings of the same room type are used instead. The value is used for the revenue of a new apartment (median, `q = 0.5`) and as the yardstick for "high occupancy" (`q = rule.high_quantile`).
+
+# Arguments
+- `df_training::DataFrame`:     Training data with the columns `district`, `room_type` and `occupancy_rate`.
+- `district::AbstractString`:   District of the apartment.
+- `room_type::AbstractString`:  Room type of the apartment.
+- `rule::NamedTuple`:           `CONFIG.occupancy_rule`; `min_count` is the smallest group that is used on its own.
+- `q::Real`:                    Quantile to return, 0.5 is the median.
+
+# Throws
+- `ArgumentError` if the training data has no listing with this room type.
+
+Returns the occupancy rate as a `Float64`.
+"""
+function occupancy_reference(df_training::DataFrame, district::AbstractString, room_type::AbstractString, rule::NamedTuple; q::Real = 0.5)
+    # 1. the listings with the same district and room type
+    # .== compares every row with the value, & keeps the rows where both comparisons are true
+    rows = df_training[(df_training.district .== district) .& (df_training.room_type .== room_type), :]
+
+    # 2. too few listings: use all listings of the same room type
+    # a group with exactly min_count rows is still used on its own (test 2)
+    if nrow(rows) < rule.min_count
+        rows = df_training[df_training.room_type .== room_type, :]
+    end
+
+    # 3. a room type that does not exist is an error
+    # without this check quantile would stop with a less helpful message
+    if nrow(rows) == 0
+        throw(ArgumentError("no listings with room type \"$room_type\""))
+    end
+
+    # 4. the quantile of the occupancy rate, q = 0.5 is the median
+    return Float64(quantile(rows.occupancy_rate, q))
+end
