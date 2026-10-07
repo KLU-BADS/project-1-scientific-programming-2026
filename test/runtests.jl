@@ -28,10 +28,22 @@ const P = Project1
     # ------------------------------------------------------------------------------------------
  
     @testset "import_csv" begin
-        # - a small CSV file written to a temporary file (tempname()) is read into a DataFrame
-        #   with the right number of rows and columns
-        # - a path that does not exist throws an error
-        @test_broken false
+        # a small CSV file written to a temporary file
+        path = tempname() * ".csv"
+        write(path, "id,price,room_type\n1,50,Private room\n2,80,Entire home/apt\n")
+        df = P.import_csv(path)
+
+        # 1. one row per line, one column per header field
+        @test size(df) == (2, 3)
+        @test names(df) == ["id", "price", "room_type"]
+
+        # 2. numbers are read as numbers, text as text
+        @test df.price == [50, 80]
+        @test eltype(df.price) <: Integer
+        @test df.room_type == ["Private room", "Entire home/apt"]
+
+        # 3. a path that does not exist throws an error
+        @test_throws ArgumentError P.import_csv(tempname() * ".csv")
     end
 
     @testset "import_user_input" begin

@@ -1,13 +1,36 @@
 using CSV, DataFrames
 
 """
-    function import_csv(filepath::String) -> DataFrame
+    import_csv(filepath::String) -> DataFrame
 
-Import file from location specified in cofig into a DataFrame
+Read a CSV file into a DataFrame, e.g. the `<city>_listings.csv` file at `CONFIG.filepath`.
+The data is returned as it is in the file; all processing happens in the later steps of `run_training_pipeline`.
 
-Returns processed listing as DataFrame `df`.
+# Arguments
+- `filepath::String`:   path to the CSV file.
 
-<!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
+# Throws
+- `ArgumentError`   if there is no file at `filepath`.
+
+Returns the file's content as a `DataFrame`, one row per line and one column per field of the header.
+
+# Examples
+```jldoctest
+julia> path = tempname() * ".csv";
+
+julia> write(path, "id,price,room_type\\n1,50,Private room\\n2,80,Entire home/apt\\n");
+
+julia> df = Project1.import_csv(path);
+
+julia> size(df)
+(2, 3)
+
+julia> names(df)
+3-element Vector{String}:
+ "id"
+ "price"
+ "room_type"
+```
 """
 function import_csv(filepath::String)
     return CSV.read(filepath, DataFrame)
