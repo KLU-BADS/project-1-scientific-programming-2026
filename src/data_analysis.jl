@@ -602,3 +602,38 @@ function assess_listing(current::Real, lower::Real, upper::Real, occupancy::Real
     difference = 0.0
     return (status = status, difference = difference)
 end 
+
+ """
+    significant_terms(fit::NamedTuple; alpha::Real = 0.05) -> Vector{String}
+
+List the terms of a fitted model whose p-value is below `alpha`.
+
+This is the one place for the significance rule, used by the tips and the findings.
+The names are written as GLM writes them: `"has_AC"` for a 0/1 column and
+`"room_type: Private room"` for a category. The intercept is a term too, so
+`"(Intercept)"` can be in the result.
+
+# Arguments
+- `fit::NamedTuple`: a fit from `regression_city`, with the field `model`.
+- `alpha::Real = 0.05`: the significance level (`CONFIG.significance_level`).
+
+Returns the names of the significant terms as a `Vector{String}`.
+"""
+function significant_terms(fit::NamedTuple; alpha::Real = 0.05)
+
+    # TODO config v2: CONFIG.significance_level (= 0.05) does not exist yet.
+    # This function does not need it: alpha has 0.05 as its default.
+    # The callers (amenity_effects, rating_effects and the findings) should pass
+    # alpha = CONFIG.significance_level once the field is in src/config.jl.
+
+    # 1. setting up coefficient table 
+    coefficient_table = coeftable(fit.model)
+    coefficient_table.rownms
+    coefficient_table.pvalcol
+    
+    # 2. keep the names that have a p-value < 0.05
+    p_values = coefficient_table.cols[coefficient_table.pvalcol]
+    is_significant = p_values .< alpha
+    return coefficient_table.rownms[is_significant]
+
+end

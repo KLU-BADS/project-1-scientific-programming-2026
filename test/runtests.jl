@@ -1299,28 +1299,6 @@ const P = Project1
         @test_throws MissingException P.get_r2(y1,y_hat) 
     end
 
-    @testset "assess_listing" begin 
-        lower = 66.0
-        upper = 140.0
-        reference = 0.6
-        cases = [
-            # status                current   occupancy   expected difference
-            (:underpriced,          50.0,     0.8,        16.0),     # below the range, well booked
-            (:not_price_problem,    50.0,     0.3,        16.0),     # below the range, rarely booked
-            (:in_line,              100.0,    0.8,        0.0),      # inside the range
-            (:overpriced,           160.0,    0.3,        20.0),     # above the range, rarely booked
-            (:unexplained_premium,  160.0,    0.8,        20.0),     # above the range, well booked
-            (:in_line,              66.0,     0.3,        0.0),      # exactly on the lower bound counts as inside
-            (:in_line,              140.0,    0.8,        0.0),      # exactly on the upper bound counts as inside
-        ]
-
-        for (expected_status, current, occupancy, expected_difference) in cases
-            result = P.assess_listing(current, lower, upper, occupancy, reference)
-            @test result.status == expected_status
-            @test result.difference == expected_difference
-        end 
-
-    end
     @testset "occupancy_reference" begin
         # 1. made-up listings: district A has 20 entire homes, B has 3, and A has 2 private rooms
         df = DataFrame(
@@ -1351,6 +1329,54 @@ const P = Project1
         # 7. error case: no listings with this room type at all
         @test_throws ArgumentError P.occupancy_reference(df, "A", "Hotel room", rule)
     end
+
+
+    @testset "assess_listing" begin 
+        lower = 66.0
+        upper = 140.0
+        reference = 0.6
+        cases = [
+            # status                current   occupancy   expected difference
+            (:underpriced,          50.0,     0.8,        16.0),     # below the range, well booked
+            (:not_price_problem,    50.0,     0.3,        16.0),     # below the range, rarely booked
+            (:in_line,              100.0,    0.8,        0.0),      # inside the range
+            (:overpriced,           160.0,    0.3,        20.0),     # above the range, rarely booked
+            (:unexplained_premium,  160.0,    0.8,        20.0),     # above the range, well booked
+            (:in_line,              66.0,     0.3,        0.0),      # exactly on the lower bound counts as inside
+            (:in_line,              140.0,    0.8,        0.0),      # exactly on the upper bound counts as inside
+        ]
+
+        for (expected_status, current, occupancy, expected_difference) in cases
+            result = P.assess_listing(current, lower, upper, occupancy, reference)
+            @test result.status == expected_status
+            @test result.difference == expected_difference
+        end 
+
+    end
+
+    @testset "significant_terms" begin 
+        # 1. create a random number generator 
+        random_n_generator = P.Random.Xoshiro(42)
+        # 2. made up data table
+        n = 200
+        x = randn(random_n_generator, n)
+        z = randn(random_n_generator, n)
+        y = 1 .+ 2 .* x .+ 0.5 .* randn(random_n_generator, n)
+        df = DataFrame(x = x, z = z, y = y)
+        # 3. fit model on data (z is included to get rejected)
+        spec = (
+        target = :y,
+        log_scale = false,
+        log1p_predictors = Symbol[],
+        predictors = [:x, :z],
+        )
+        fit = P.regression_city(df, spec)
+
+        # 4. check result 
+        terms = P.significant_terms(fit)
+        @test "x" ∈ terms
+        @test "z" ∉ terms
+    end 
 
     # ------------------------------------------------------------------------------------------
     # visualization.jl
