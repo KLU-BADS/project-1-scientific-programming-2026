@@ -1787,6 +1787,48 @@ const P = Project1
     # ------------------------------------------------------------------------------------------
     # user_interface.jl
     # ------------------------------------------------------------------------------------------
+    @testset "enter_apartment_data" begin
+        # The questions themselves need a real terminal (two menus) and are tested by hand:
+        # both groups once each, and leaving at every step (room type, a size question, location,
+        # Superhost, a listed question) must give nothing.
+
+        # 1. a group that does not exist is refused before any question is asked
+        @test_throws ArgumentError P.enter_apartment_data(:old, DataFrame())
+
+        # 2. Symbols are case-sensitive: :Listed is not :listed
+        @test_throws ArgumentError P.enter_apartment_data(:Listed, DataFrame())
+
+        # 3. a group given as text instead of a Symbol does not match the signature
+        @test_throws MethodError P.enter_apartment_data("new", DataFrame())
+    end
+
+    @testset "get_room_type_options" begin
+        # 3 x Entire home/apt, 2 x Private room, 1 x Hotel room; the order is mixed on purpose
+        df = DataFrame(room_type = ["Private room", "Entire home/apt", "Hotel room",
+                                    "Entire home/apt", "Private room", "Entire home/apt"])
+
+        # 1. room types below the threshold are left out; a room type exactly at the threshold is kept (>=);
+        #    the result is sorted alphabetically
+        @test P.get_room_type_options(df, 2) == ["Entire home/apt" => "Entire home/apt", "Private room" => "Private room"]
+
+        # 2. threshold 1: every room type is offered, sorted
+        @test first.(P.get_room_type_options(df, 1)) == ["Entire home/apt", "Hotel room", "Private room"]
+
+        # 3. label and value of every pair are the same text
+        @test all(first(p) == last(p) for p in P.get_room_type_options(df, 1))
+
+        # 4. no room type has enough listings: empty list
+        @test isempty(P.get_room_type_options(df, 4))
+
+        # 5. the text is always a plain String, also when the column has another text type
+        #    (CSV reads the real data as String15; SubString stands in for that here)
+        df_substrings = DataFrame(room_type = SubString.(["Private room", "Private room"]))
+        @test P.get_room_type_options(df_substrings, 1) isa Vector{Pair{String,String}}
+
+        # 6. the threshold must be a whole number
+        @test_throws MethodError P.get_room_type_options(df, 2.5)
+    end
+
     @testset "ask_choice" begin
         # The menu itself needs a real terminal and is tested by hand:
         # pick an item, pick "Exit", press q, press Ctrl-C (the last three must give nothing).
