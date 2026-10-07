@@ -62,9 +62,16 @@ The returned values are ordered the same way as `CONFIG.regression_models`, and 
 `CONFIG.test_size` and `CONFIG.split_seed`.
 """
 function run_analysis_pipeline(df::DataFrame)
+    # 1. split the data into training and test set (same seed every time, so the split is reproducible)
     df_training, df_test = split_dataset(df, CONFIG.test_size; seed = CONFIG.split_seed)
-    fits = [regression_city(df_training, spec) for spec in CONFIG.regression_models]
+
+    # 2. fit every model of CONFIG.regression_models on the training set;
+    # the base category of room type and district comes from CONFIG.reference_levels
+    fits = [regression_city(df_training, spec; reference_levels = CONFIG.reference_levels) for spec in CONFIG.regression_models]
+
+    # 3. score every fit on the test set
     scores = [evaluate_regression(fit, df_test) for fit in fits]
+
     return (fits = fits, scores = scores, df_training = df_training, df_test = df_test)
 end
 

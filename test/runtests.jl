@@ -1700,7 +1700,19 @@ const P = Project1
             # test --> checks if each model was scored on exactly the test set (number of listings (n) must equal test set)
             @test 0 < score.r2_model_scale <= 1
         end
-
+        # the three fits are named like CONFIG.regression_models, in the same order, and found by name
+        @test [fit.spec.name for fit in result.fits] == [spec.name for spec in P.CONFIG.regression_models]
+        price_fit = P.get_fit(result.fits, :price)
+        @test price_fit.spec.target == :price
+        # reference levels: the most common room type and district are the base category, so they have no coefficient
+        coef_names = P.coefnames(price_fit.model)
+        for col in (:room_type, :district)
+            counts = combine(groupby(result.df_training, col), nrow => :n)
+            base = counts[argmax(counts.n), col]
+            @test !("$col: $base" in coef_names)
+            # the other categories of the column still have their own coefficient
+            @test any(startswith("$col: "), coef_names)
+        end
     end
  
     @testset "run_inference_pipeline" begin
