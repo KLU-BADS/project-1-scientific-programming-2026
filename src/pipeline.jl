@@ -38,7 +38,6 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
         calculate_ratio!(df, rule)
     end
     calculate_distance!(df, CONFIG.distance_rule, CONFIG.cities[CONFIG.city].center)
-<<<<<<< HEAD
     kept = kept_categories(df, CONFIG.category_rule)
     group_rare_categories!(df, CONFIG.category_rule, kept)
     centers = Dict{Symbol,Float64}()
@@ -47,7 +46,6 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
         calculate_square!(df, rule, centers[rule.source])
     end
     return (df = df, fitted = (caps = caps, kept_districts = kept, square_centers = centers))
-=======
     # 1. the values learned from the training data
     # the new steps (caps, rare districts, squares) will fill these; until they are implemented the values are empty placeholders
     # TODO: replace the placeholders with the results of compute_caps, kept_categories and square_center
@@ -59,7 +57,6 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
     # 2. return the cleaned table together with the learned values
     # a named tuple lets the caller write result.df and result.fitted
     return (df = df, fitted = fitted)
->>>>>>> origin/main
 end
 
 """
