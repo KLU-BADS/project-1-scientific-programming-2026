@@ -393,10 +393,6 @@ function get_r2(y::AbstractVector, y_hat::AbstractVector)
     return 1 - sum((y .- y_hat) .^2) / sum((y .- mean(y)) .^2)
 end
 
-function get_fit()
-
-end 
-
 """
     predict_price_range(fit::NamedTuple, df_new::DataFrame; level::Real = 0.8) -> NamedTuple
 
