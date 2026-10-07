@@ -901,7 +901,11 @@ julia> Project1.square_center(df, merge(rule, (center = false,)))
 function square_center(df::DataFrame, rule::NamedTuple)
     # 1. Get the column 
     values = df[!, rule.source]
-    # 2. Branch on the rule.center flag
+    # 2. Check for missing values 
+     if any(ismissing, values)
+        error("Value is missing in column $(rule.source)")
+    end
+    # 3. Branch on the rule.center flag
     # Statistics package is necessary
     if rule.center
         return mean(values)
