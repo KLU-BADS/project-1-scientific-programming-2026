@@ -621,17 +621,12 @@ Returns the names of the significant terms as a `Vector{String}`.
 """
 function significant_terms(fit::NamedTuple; alpha::Real = 0.05)
 
-    # TODO config v2: CONFIG.significance_level (= 0.05) does not exist yet.
-    # This function does not need it: alpha has 0.05 as its default.
-    # The callers (amenity_effects, rating_effects and the findings) should pass
-    # alpha = CONFIG.significance_level once the field is in src/config.jl.
-
     # 1. setting up coefficient table 
     coefficient_table = coeftable(fit.model)
     coefficient_table.rownms
     coefficient_table.pvalcol
     
-    # 2. keep the names that have a p-value < 0.05
+    # 2. keep the names that have a p-value < alpha
     p_values = coefficient_table.cols[coefficient_table.pvalcol]
     is_significant = p_values .< alpha
     return coefficient_table.rownms[is_significant]

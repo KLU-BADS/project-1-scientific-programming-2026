@@ -1373,9 +1373,18 @@ const P = Project1
         fit = P.regression_city(df, spec)
 
         # 4. check result 
-        terms = P.significant_terms(fit)
+        terms = P.significant_terms(fit; alpha = 1e-6)
         @test "x" ∈ terms
         @test "z" ∉ terms
+
+        # 5. intercept is a term too
+        @test "(Intercept)" ∈ terms
+
+        # 6. alpha is used: no p-value is below 0
+        @test isempty(P.significant_terms(fit; alpha = 0.0))
+
+        # 7. result is a list of strings
+        @test terms isa Vector{String}
     end 
 
     # ------------------------------------------------------------------------------------------
