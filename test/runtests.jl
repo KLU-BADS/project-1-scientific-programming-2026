@@ -1452,5 +1452,89 @@ const P = Project1
         @test_broken false
     end
  
+    # ------------------------------------------------------------------------------------------
+    # user_interface.jl
+    # ------------------------------------------------------------------------------------------
+ 
+    @testset "ask_number" begin
+        # IOBuffer("4\n") simulates user input of 4 and pressed Enter
+        # ("abc\n5\n") represents several consecutive inputs, one after the other.
+        # Empty IOBuffer() catches everything the function prints,
+        # to check the messages with String(take!(...)).
+
+        # 1. A valid whole number is returned as an Int
+        user_input = IOBuffer("4\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 4
+        @test result isa Int
+
+        # 2. A valid decimal number is returned as a Float64
+        user_input = IOBuffer("2.5\n")
+        printed = IOBuffer()
+        result = P.ask_number("Rating: ", Float64, 0, 10; io_in = user_input, io_out = printed)
+        @test result == 2.5
+        @test result isa Float64
+
+        # 3. Spaces around the number are ignored
+        user_input = IOBuffer("  7  \n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 7
+
+        # 4. Text instead of a number: the function asks again
+        #    First answer "abc" is invalid, second answer "5" is valid
+        user_input = IOBuffer("abc\n5\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 5
+        @test occursin("whole number", String(take!(printed)))     # the error message was shown
+
+        # 5. A decimal number is not accepted when a whole number (Int) is asked for
+        user_input = IOBuffer("3.5\n4\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 4
+
+        # 6. A number outside the range: the function asks again
+        #    50 is too high, 0 is too low, 5 is fine
+        user_input = IOBuffer("50\n0\n5\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 5
+        @test occursin("between", String(take!(printed)))          # the range message was shown
+
+        # 7. Boundary values: by default (inclusive_interval = false) 16 itself is NOT allowed ...
+        user_input = IOBuffer("16\n8\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 8                                          # 16 was rejected, 8 accepted
+
+        # ... but with inclusive_interval = true, 16 IS allowed
+        user_input = IOBuffer("16\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16, true; io_in = user_input, io_out = printed)
+        @test result == 16
+
+        # 8. Without min and max, every number is allowed
+        user_input = IOBuffer("-1000\n")
+        printed = IOBuffer()
+        result = P.ask_number("Any number: ", Int; io_in = user_input, io_out = printed)
+        @test result == -1000
+
+        # 9. The user cancels with q, quit or exit (upper or lower case): the result is nothing
+        for cancel_word in ["q", "quit", "EXIT"]
+            user_input = IOBuffer(cancel_word * "\n")
+            printed = IOBuffer()
+            result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+            @test isnothing(result)
+        end
+
+        # 10. The input ends before a valid number was given: the result is nothing
+        user_input = IOBuffer("abc\n")                             # only one invalid answer, then nothing more
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test isnothing(result)
+    end
 end
  
