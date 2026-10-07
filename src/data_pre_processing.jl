@@ -1130,7 +1130,7 @@ Rules with another source (e.g. `:is_superhost`) are left out. Returns an empty 
 julia> rules = [(source = :amenities, target = :has_AC), (source = :is_superhost, target = :is_superhost),
                 (source = :amenities, target = :has_tv)];
 
-julia> Project1.geet_amenity_columns(rules)
+julia> Project1.get_amenity_columns(rules)
 2-element Vector{Symbol}:
  :has_AC
  :has_tv
