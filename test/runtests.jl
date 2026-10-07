@@ -1272,6 +1272,37 @@ const P = Project1
         @test_throws MissingException P.get_r2(y1,y_hat) 
      end
 
+    @testset "occupancy_reference" begin
+        # 1. made-up listings: district A has 20 entire homes, B has 3, and A has 2 private rooms
+        df = DataFrame(
+            district = vcat(fill("A", 20), fill("B", 3), fill("A", 2)),
+            room_type = vcat(fill("Entire home/apt", 23), fill("Private room", 2)),
+            occupancy_rate = vcat(collect(1:20) ./ 100, [0.5, 0.6, 0.7], [0.3, 0.4]),
+        )
+        rule = (group_by = [:district, :room_type], min_count = 20, fallback = :room_type, high_quantile = 0.5)
+
+        # 2. a group with exactly min_count listings uses its own median
+        # the median of 0.01 ... 0.20 is (0.10 + 0.11) / 2
+        @test P.occupancy_reference(df, "A", "Entire home/apt", rule) ≈ 0.105
+
+        # 3. a group with fewer listings falls back to the median of the room type (all 23 entire homes)
+        @test P.occupancy_reference(df, "B", "Entire home/apt", rule) ≈ 0.12
+
+        # 4. a district that does not exist falls back in the same way
+        @test P.occupancy_reference(df, "Z", "Entire home/apt", rule) ≈ 0.12
+
+        # 5. q chooses the quantile: 0.75 gives a higher value than the median
+        high = P.occupancy_reference(df, "A", "Entire home/apt", rule; q = 0.75)
+        @test high ≈ 0.1525
+        @test high > P.occupancy_reference(df, "A", "Entire home/apt", rule)
+
+        # 6. the result is a plain Float64
+        @test P.occupancy_reference(df, "A", "Entire home/apt", rule) isa Float64
+
+        # 7. error case: no listings with this room type at all
+        @test_throws ArgumentError P.occupancy_reference(df, "A", "Hotel room", rule)
+    end
+
     # ------------------------------------------------------------------------------------------
     # visualization.jl
     # ------------------------------------------------------------------------------------------
