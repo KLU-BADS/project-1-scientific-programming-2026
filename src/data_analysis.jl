@@ -463,6 +463,105 @@ function get_r2(y::AbstractVector, y_hat::AbstractVector)
     return 1 - sum((y .- y_hat) .^2) / sum((y .- mean(y)) .^2)
 end
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"""
+    assess_listing(current::Real, lower::Real, upper::Real, occupancy::Real, reference::Real) -> NamedTuple
+
+Compare the current price of a listed apartment with its predicted price range.
+
+A price below the range means something different for a fully booked apartment (there is room
+to raise it) than for an empty one (the problem is elsewhere), so the occupancy is compared with
+the "high" occupancy of comparable listings. A price exactly on a bound counts as inside the range.
+
+# Arguments
+- `current::Real`:   The current price per night, in euros.
+- `lower::Real`:     Lower end of the price range from `predict_price_range`.
+- `upper::Real`:     Upper end of the price range from `predict_price_range`.
+- `occupancy::Real`: The listing's occupancy rate, booked nights divided by 365.
+- `reference::Real`: The "high" occupancy threshold of comparable listings.
+
+Returns `(status, difference)`: `status` is one of `:underpriced`, `:not_price_problem`, `:in_line`,
+`:overpriced` or `:unexplained_premium`, and `difference` is the distance to the nearest bound in
+euros, 0 inside the range.
+"""
+function assess_listing(current::Real, lower::Real, upper::Real, occupancy::Real, reference::Real)
+    # 1. below range, well-booked apartment could charge more, an empty one has another problem 
+    if current < lower 
+        if occupancy >= reference 
+            status = :underpriced
+        else
+            status = :not_price_problem
+        end
+        difference = lower - current 
+        return (status = status, difference = difference) 
+    end
+    # 2. above range, well-booked apartment has an unexplained premium, an empty one is overpriced
+    if current > upper 
+        if occupancy >= reference 
+            status = :unexplained_premium 
+        else 
+            status = :overpriced
+        end
+        difference = current - upper
+        return (status = status, difference = difference)
+    end 
+    # 3. inside range, appropriate pricing
+    status = :in_line
+    difference = 0.0
+    return (status = status, difference = difference)
+end 
 """
     occupancy_reference(df_training::DataFrame, district::AbstractString, room_type::AbstractString, rule::NamedTuple; q::Real = 0.5) -> Float64
 
