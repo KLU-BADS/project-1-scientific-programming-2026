@@ -669,6 +669,59 @@ const P = Project1
         # the limit cannot be calculated from an empty cell either
     end
 
+    @testset "input_bounds" begin
+        # 1. made-up training data with two room types
+        df = DataFrame(
+            room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room"],
+            accommodates = [2, 4, 6, 10],
+            bedrooms = [1, 2, 3, 5],
+            beds = [2, 3, 5, 6],
+            bathrooms = [1.0, 1.5, 6.0, 4.0],
+        )
+        entire = Dict(:room_type => "Entire home/apt")
+        no_rules = NamedTuple[]
+        # a rule needs only column, value_type, min and max here; min or max = nothing means "take it from the data"
+
+        # 2. fixed limits are used as they are, the data is not needed
+        rule_fixed = (column = :accommodates, value_type = Int, min = 1, max = 8)
+        @test P.input_bounds(rule_fixed, entire, df, no_rules) == (1, 8)
+
+        # 3. nothing = the smallest and largest value of the chosen room type
+        rule_bedrooms = (column = :bedrooms, value_type = Int, min = nothing, max = nothing)
+        @test P.input_bounds(rule_bedrooms, entire, df, no_rules) == (1, 3)
+        @test P.input_bounds(rule_bedrooms, Dict(:room_type => "Private room"), df, no_rules) == (5, 5)
+
+        # 4. a fixed minimum and a maximum from the data can be mixed
+        rule_guests = (column = :accommodates, value_type = Int, min = 1, max = nothing)
+        @test P.input_bounds(rule_guests, entire, df, no_rules) == (1, 6)
+
+        # 5. a plausibility rule limits the maximum by an earlier answer
+        # only the rules whose column is the question count: the bathrooms question ignores the bedrooms rule
+        rules = [(column = :bathrooms, max_of = :bedrooms,     factor = 1.0, offset = 2.0),
+                 (column = :bedrooms,  max_of = :accommodates, factor = 1.0, offset = 0.0),
+                 (column = :beds,      max_of = :accommodates, factor = 1.5, offset = 0.0)]
+        rule_bathrooms = (column = :bathrooms, value_type = Float64, min = 0.5, max = nothing)
+        # 1 bedroom: at most 1 + 2 = 3 bathrooms, although the data goes up to 6.0
+        @test P.input_bounds(rule_bathrooms, Dict(:room_type => "Entire home/apt", :bedrooms => 1), df, rules) == (0.5, 3.0)
+        # 2 guests: at most 2 bedrooms, although the data goes up to 3
+        @test P.input_bounds(rule_bedrooms, Dict(:room_type => "Entire home/apt", :accommodates => 2), df, rules) == (1, 2)
+
+        # 6. a limit above the data maximum does not raise the maximum
+        @test P.input_bounds(rule_bathrooms, Dict(:room_type => "Entire home/apt", :bedrooms => 10), df, rules) == (0.5, 6.0)
+
+        # 7. whole-number questions are rounded inwards: the minimum up, the maximum down
+        # 3 guests: 1.5 * 3 = 4.5 beds at most, which becomes 4; the minimum 1.2 becomes 2
+        rule_beds = (column = :beds, value_type = Int, min = 1.2, max = nothing)
+        lo, hi = P.input_bounds(rule_beds, Dict(:room_type => "Entire home/apt", :accommodates => 3), df, rules)
+        @test (lo, hi) == (2, 4)
+        @test lo isa Int
+        @test hi isa Int
+
+        # 8. error cases: the earlier answer is missing, or the room type does not exist
+        @test_throws ArgumentError P.input_bounds(rule_bathrooms, entire, df, rules)
+        @test_throws ArgumentError P.input_bounds(rule_bedrooms, Dict(:room_type => "Hotel room"), df, no_rules)
+    end
+
     @testset "compute_caps" begin
         # 1. the cap rule, written here so the test does not depend on CONFIG
         # the quantile is 0.75 instead of 0.995 so that the expected caps are easy to count by hand; the code is the same
@@ -976,6 +1029,25 @@ const P = Project1
         # (4.5 - 4.8)^2 = 0.09 and (5.0 - 4.8)^2 = 0.04; ≈ because decimals are not stored exactly
 
     end
+
+    @testset "get_amenity_columns" begin
+        # own small rule list, so the test does not depend on CONFIG
+        rules = [
+            (source = :amenities,    target = :has_AC,       keywords = ["air conditioning"], delete = false),
+            (source = :is_superhost, target = :is_superhost, keywords = ["t"],                delete = false),
+            (source = :amenities,    target = :has_tv,       keywords = ["tv"],               delete = false),
+        ]
+
+        # 1. only the targets of amenity rules, in the order of the rules
+        @test P.get_amenity_columns(rules) == [:has_AC, :has_tv]
+
+        # 2. the result is a list of column names (Symbols)
+        @test eltype(P.get_amenity_columns(rules)) == Symbol
+
+        # 3. no amenity rule: empty list
+        @test isempty(P.get_amenity_columns([(source = :is_superhost, target = :is_superhost, keywords = ["t"], delete = false)]))
+    end
+
     # ------------------------------------------------------------------------------------------
     # data_analysis.jl
     # ------------------------------------------------------------------------------------------
@@ -1299,6 +1371,80 @@ const P = Project1
         @test_throws MissingException P.get_r2(y1,y_hat) 
     end
 
+     @testset "predict_price_range" begin 
+        # 1. test setup 
+        x = 1:20
+        error_term = 0.1 .* sin.(x)
+        df = DataFrame(accommodates = x, price = exp.(3.0 .+ 0.1 .* x .+ error_term))
+        spec = (target = :price,
+            log_scale = true,
+            log1p_predictors = Symbol[],
+            predictors = [:accommodates])
+        fit = P.regression_city(df, spec)
+
+        # 2. call function, keeping a copy of the input to check it is not changed
+        df_before = copy(df)
+        result = P.predict_price_range(fit, df)
+        
+        # 3. the lower bound is below the median and median is below upper bound
+        @test all(result.lower .<= result.median)
+        @test all(result.median .<= result.upper)
+
+        # 4. smearing lifts the mean above the median 
+        @test all(result.mean .>= result.median)
+        @test result.mean ≈ result.median .* fit.smearing
+
+        # 5. the median is close to the real prices, so exp was applied
+        @test all(abs.(log.(result.median) .- log.(df.price)) .< 0.2)
+        
+        # 6. a 95% range covers more apartments, so it is wider than the 80% range
+        result_95 = P.predict_price_range(fit, df; level = 0.95)
+        width_80 = result.upper .- result.lower
+        width_95 = result_95.upper .- result_95.lower 
+
+        @test all(width_95 .> width_80)
+
+        # 6. the input table remains the same
+        @test df == df_before
+
+        # 7. log_scale = false
+         x = 1:20
+        error_term = 0.1 .* sin.(x)
+        df_2 = DataFrame(accommodates = x, price = exp.(3.0 .+ 0.1 .* x .+ error_term))
+        spec_2 = (target = :price,
+            log_scale = false,
+            log1p_predictors = Symbol[],
+            predictors = [:accommodates])
+        fit_2 = P.regression_city(df_2, spec_2)
+
+        df_before_2 = copy(df_2)
+        result_2 = P.predict_price_range(fit_2, df_2)    
+
+        @test result_2.median ≈ result_2.mean
+        @test df_2 == df_before_2
+    end 
+    @testset "assess_listing" begin 
+        lower = 66.0
+        upper = 140.0
+        reference = 0.6
+        cases = [
+            # status                current   occupancy   expected difference
+            (:underpriced,          50.0,     0.8,        16.0),     # below the range, well booked
+            (:not_price_problem,    50.0,     0.3,        16.0),     # below the range, rarely booked
+            (:in_line,              100.0,    0.8,        0.0),      # inside the range
+            (:overpriced,           160.0,    0.3,        20.0),     # above the range, rarely booked
+            (:unexplained_premium,  160.0,    0.8,        20.0),     # above the range, well booked
+            (:in_line,              66.0,     0.3,        0.0),      # exactly on the lower bound counts as inside
+            (:in_line,              140.0,    0.8,        0.0),      # exactly on the upper bound counts as inside
+        ]
+
+        for (expected_status, current, occupancy, expected_difference) in cases
+            result = P.assess_listing(current, lower, upper, occupancy, reference)
+            @test result.status == expected_status
+            @test result.difference == expected_difference
+        end 
+
+    end
     @testset "occupancy_reference" begin
         # 1. made-up listings: district A has 20 entire homes, B has 3, and A has 2 private rooms
         df = DataFrame(
@@ -1562,6 +1708,117 @@ const P = Project1
         @test_throws ArgumentError P.plot_predicted_vs_actual(Float64[], Float64[]; io = IOBuffer())
     end
 
+    @testset "visualize_results" begin
+        # a made-up bundle for a listed apartment that is priced above its range
+        listed = (
+            group = :listed,
+            level = 0.8,
+            price = (median = 96.0, mean = 101.0, lower = 66.0, upper = 140.0),
+            nights = 72.0,
+            revenue = (estimate = 7272.0, lower = 4752.0, upper = 10080.0),
+            current_price = 150.0,
+            assessment = (status = :overpriced, difference = 10.0),
+            district = "Koukaki",
+            room_type = "Entire home/apt",
+            tips = DataFrame(amenity = [:has_AC], change = [7.5], change_pct = [7.8]),
+            rating_tips = DataFrame(score = [:review_scores_cleanliness], pct_per_step = [1.3]),
+        )
+        # the same apartment as a new one: no current price, no assessment, no revenue range
+        new = merge(listed, (group = :new, current_price = nothing, assessment = nothing,
+                             revenue = (estimate = 7272.0, lower = nothing, upper = nothing)))
+        # merge copies the bundle and replaces only the fields given in the second NamedTuple
+
+        # 1. happy path: a listed apartment shows its header, the typical price and the range with ▲
+        io = IOBuffer()
+        result = P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("YOUR LISTING · Koukaki, Entire home/apt", output)
+        @test occursin("Typical price for comparable listings   €96", output)
+        @test occursin("Range (8 of 10 comparable)   €66 to €140", output)
+        @test occursin("▲", output)
+        @test result === nothing
+
+        # 2. edge case: a new apartment has another header and no ▲, because it has no current price
+        io = IOBuffer()
+        P.visualize_results(new; io = io)
+        output = String(take!(io))
+        @test occursin("NEW LISTING", output)
+        @test !occursin("▲", output)
+
+        # 3. happy path: a listed apartment shows the assessment and the revenue with its range
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("Your price €150 is above the range by €10", output)
+        @test occursin("possibly overpriced", output)
+        @test occursin("Revenue at €101 × your 72 nights   €7,272", output)
+        @test occursin("range €4,752 to €10,080", output)
+
+        # 4. edge case: a new apartment gets no assessment and only a rough revenue estimate
+        io = IOBuffer()
+        P.visualize_results(new; io = io)
+        output = String(take!(io))
+        @test occursin("Expected revenue (rough estimate)   €7,272", output)
+        @test !occursin("Your price", output)
+
+        # 5. edge case: a price inside the range is in line
+        in_line = merge(listed, (current_price = 100.0, assessment = (status = :in_line, difference = 0.0)))
+        io = IOBuffer()
+        P.visualize_results(in_line; io = io)
+        output = String(take!(io))
+        @test occursin("Your price €100 is inside the range", output)
+        @test occursin("in line with comparable listings", output)
+
+        # 6. error case: an unknown status is rejected instead of printing a wrong message
+        unknown = merge(listed, (assessment = (status = :cheap, difference = 5.0),))
+        @test_throws KeyError P.visualize_results(unknown; io = IOBuffer())
+        # :cheap is not one of the five statuses, so the Dict lookup throws a KeyError
+
+        # 7. happy path: the amenity tip, the rating tip and the footer are printed
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("+ Air conditioning   +€7.50 per night (+7.8%)", output)
+        @test occursin("Listings rated 0.1 higher for cleanliness charge about 1.3% more.", output)
+        @test occursin("Based on comparable listings, not a guarantee.", output)
+
+        # 8. edge case: an empty tips table prints the sentence instead of tips
+        no_tips = merge(listed, (tips = DataFrame(amenity = Symbol[], change = Float64[], change_pct = Float64[]),))
+        io = IOBuffer()
+        P.visualize_results(no_tips; io = io)
+        @test occursin("No missing amenity has a clear price effect.", String(take!(io)))
+
+        # 9. edge case: with five tips only the first three are shown
+        five_tips = merge(listed, (tips = DataFrame(amenity = [:has_AC, :has_tv, :has_kettle, :has_washer, :has_dishwasher],
+                                                    change = [7.5, 5.0, 3.0, 2.0, 1.0],
+                                                    change_pct = [7.8, 5.2, 3.1, 2.1, 1.0]),))
+        io = IOBuffer()
+        P.visualize_results(five_tips; io = io)
+        @test count("per night", String(take!(io))) == 3
+        # count gives how often the text appears, every tip line contains "per night" once
+
+        # 10. error case: an amenity without a label in CONFIG is rejected
+        unknown_amenity = merge(listed, (tips = DataFrame(amenity = [:has_jacuzzi], change = [9.0], change_pct = [9.0]),))
+        @test_throws KeyError P.visualize_results(unknown_amenity; io = IOBuffer())
+
+        # 11. edge case: the three statuses not covered above print where the price lies and their own message
+        statuses = [
+            # status                current price   where it lies       start of the message
+            (:underpriced,          50.0,           "below the range",  "probably underpriced"),
+            (:not_price_problem,    50.0,           "below the range",  "cheap but few bookings"),
+            (:unexplained_premium,  150.0,          "above the range",  "guests pay more than the model expects"),
+        ]
+        @testset "status $status" for (status, price, position, message) in statuses
+            bundle = merge(listed, (current_price = price, assessment = (status = status, difference = 16.0)))
+            io = IOBuffer()
+            P.visualize_results(bundle; io = io)
+            output = String(take!(io))
+            @test occursin("Your price $(P.format_eur(price)) is $position", output)
+            @test occursin(message, output)
+        end
+        # @testset ... for runs the same two tests once for every row of the list, each as its own small test set
+    end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------
@@ -1682,7 +1939,19 @@ const P = Project1
             # test --> checks if each model was scored on exactly the test set (number of listings (n) must equal test set)
             @test 0 < score.r2_model_scale <= 1
         end
-
+        # the three fits are named like CONFIG.regression_models, in the same order, and found by name
+        @test [fit.spec.name for fit in result.fits] == [spec.name for spec in P.CONFIG.regression_models]
+        price_fit = P.get_fit(result.fits, :price)
+        @test price_fit.spec.target == :price
+        # reference levels: the most common room type and district are the base category, so they have no coefficient
+        coef_names = P.coefnames(price_fit.model)
+        for col in (:room_type, :district)
+            counts = combine(groupby(result.df_training, col), nrow => :n)
+            base = counts[argmax(counts.n), col]
+            @test !("$col: $base" in coef_names)
+            # the other categories of the column still have their own coefficient
+            @test any(startswith("$col: "), coef_names)
+        end
     end
  
     @testset "run_inference_pipeline" begin
@@ -1926,6 +2195,64 @@ const P = Project1
         @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("q\n"), io_out = IOBuffer()))
         @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("37.99\nexit\n"), io_out = IOBuffer()))
         @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer(""), io_out = IOBuffer()))
+    end
+
+    @testset "ask_numbers!" begin
+        # tiny training data with two room types; only the limits are taken from it
+        df = DataFrame(room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room", "Private room"],
+                       accommodates = [2, 4, 6, 1, 2],
+                       bedrooms     = [1, 2, 3, 1, 1],
+                       bathrooms    = [1.0, 1.5, 2.0, 1.0, 1.0])
+        # own rules, so the tests do not depend on CONFIG
+        rules = [
+            (column = :accommodates, value_type = Int,     min = 1,       max = nothing, prompt = "Guests: ",    groups = [:new, :listed]),
+            (column = :bedrooms,     value_type = Int,     min = nothing, max = nothing, prompt = "Bedrooms: ",  groups = [:new, :listed]),
+            (column = :bathrooms,    value_type = Float64, min = 0.5,     max = nothing, prompt = "Bathrooms: ", groups = [:new, :listed]),
+        ]
+        plausibility = [
+            (column = :bedrooms,  max_of = :accommodates, factor = 1.0, offset = 0.0),
+            (column = :bathrooms, max_of = :bedrooms,     factor = 1.0, offset = 2.0),
+        ]
+        new_answers(room_type) = Dict{Symbol,Any}(:room_type => room_type)
+
+        # 1. all questions answered: true, every answer stored under its column with the right type
+        answers = new_answers("Entire home/apt")
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("4\n2\n1.5\n"), io_out = IOBuffer())
+        @test answers[:accommodates] == 4 && answers[:accommodates] isa Int
+        @test answers[:bedrooms] == 2
+        @test answers[:bathrooms] == 1.5 && answers[:bathrooms] isa Float64
+        @test answers[:room_type] == "Entire home/apt"            # earlier answers are kept
+
+        # 2. exit at the second question: false, the first answer stays, the second is not stored
+        answers = new_answers("Entire home/apt")
+        @test !P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("4\nq\n"), io_out = IOBuffer())
+        @test answers[:accommodates] == 4
+        @test !haskey(answers, :bedrooms)
+
+        # 3. input that ends before all questions are answered: false
+        @test !P.ask_numbers!(new_answers("Entire home/apt"), rules, df, plausibility; io_in = IOBuffer("4\n"), io_out = IOBuffer())
+
+        # 4. a value above the room type's training maximum (6 guests) is refused, then a valid one is accepted
+        answers = new_answers("Entire home/apt")
+        out = IOBuffer()
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("7\n6\n2\n1.5\n"), io_out = out)
+        @test answers[:accommodates] == 6
+        @test occursin("between", String(take!(out)))
+
+        # 5. the limits depend on the room type: a private room allows at most 2 guests
+        answers = new_answers("Private room")
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("3\n2\n1\n1.0\n"), io_out = IOBuffer())
+        @test answers[:accommodates] == 2
+
+        # 6. a plausibility rule uses an earlier answer: with 2 guests, 3 bedrooms are refused
+        answers = new_answers("Entire home/apt")
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("2\n3\n2\n1.5\n"), io_out = IOBuffer())
+        @test answers[:bedrooms] == 2
+
+        # 7. no rules: nothing is asked, true
+        answers = new_answers("Entire home/apt")
+        @test P.ask_numbers!(answers, NamedTuple[], df, plausibility; io_in = IOBuffer(""), io_out = IOBuffer())
+        @test length(answers) == 1
     end
 end
  
