@@ -392,3 +392,59 @@ function get_r2(y::AbstractVector, y_hat::AbstractVector)
     # return R-squared
     return 1 - sum((y .- y_hat) .^2) / sum((y .- mean(y)) .^2)
 end
+
+function get_fit()
+
+end 
+
+"""
+    predict_price_range(fit::NamedTuple, df_new::DataFrame; level::Real = 0.8) -> NamedTuple
+
+Predict a price range in euros for each row of `df_new`.
+
+The range is a prediction interval: it covers the price of a share `level` of
+comparable apartments (0.8 means 8 out of 10). The recommended price is the median.
+For a log price model, the median and the bounds are transformed back with `exp`,
+and the mean is the median times `fit.smearing`. The bounds are quantiles, so they
+get no smearing. For a model without a log, the median and the mean are the
+prediction itself. `df_new` is not changed.
+
+# Arguments
+- `fit::NamedTuple`: a fit from `regression_city`, with the fields `spec`, `model` and `smearing`.
+- `df_new::DataFrame`: prepared rows with all predictors of `fit.spec`.
+- `level::Real = 0.8`: the share of comparable apartments the range should cover
+  (`CONFIG.interval_level`).
+
+Returns `(median, mean, lower, upper)`, each a `Vector{Float64}` with one value per row, in euros.
+"""
+function predict_price_range(fit::NamedTuple, df_new::DataFrame; level::Real = 0.8)
+    # 1. turn the rows into the matrix of predictors the model was trained on
+    predictor_matrix = prepare_predictors(df_new, fit.spec)
+    
+    # 2. predict with a prediction interval: a table with columns prediction, lower, and upper 
+    predictions = predict(fit.model, predictor_matrix; interval = :prediction, level = level)
+    
+    # 3. take the three columns as plain numbers, still on model's scale
+    unconverted_prediction = Float64.(predictions.prediction)
+    unconverted_lower = Float64.(predictions.lower)
+    unconverted_upper = Float64.(predictions.upper)
+    # Float64.() converts every value, because the columns allow missing 
+    
+    # 4. converts the models answer from log scale to euros 
+    if fit.spec.log_scale
+        median = exp.(unconverted_prediction)
+        lower = exp.(unconverted_lower)
+        upper = exp.(unconverted_upper)
+        mean = median .* fit.smearing 
+        # exp of a log prediction is the median; smearing lifts it to the mean
+        # the bounds are quantiles, so they need no smearing
+    else 
+        median = unconverted_prediction
+        lower = unconverted_lower
+        upper = unconverted_upper
+        mean = unconverted_prediction 
+    end 
+
+    # 5. return results
+    return (median = median, mean = mean, lower = lower, upper = upper)
+end 
