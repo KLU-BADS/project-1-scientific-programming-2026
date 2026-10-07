@@ -669,6 +669,59 @@ const P = Project1
         # the limit cannot be calculated from an empty cell either
     end
 
+    @testset "input_bounds" begin
+        # 1. made-up training data with two room types
+        df = DataFrame(
+            room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room"],
+            accommodates = [2, 4, 6, 10],
+            bedrooms = [1, 2, 3, 5],
+            beds = [2, 3, 5, 6],
+            bathrooms = [1.0, 1.5, 6.0, 4.0],
+        )
+        entire = Dict(:room_type => "Entire home/apt")
+        no_rules = NamedTuple[]
+        # a rule needs only column, value_type, min and max here; min or max = nothing means "take it from the data"
+
+        # 2. fixed limits are used as they are, the data is not needed
+        rule_fixed = (column = :accommodates, value_type = Int, min = 1, max = 8)
+        @test P.input_bounds(rule_fixed, entire, df, no_rules) == (1, 8)
+
+        # 3. nothing = the smallest and largest value of the chosen room type
+        rule_bedrooms = (column = :bedrooms, value_type = Int, min = nothing, max = nothing)
+        @test P.input_bounds(rule_bedrooms, entire, df, no_rules) == (1, 3)
+        @test P.input_bounds(rule_bedrooms, Dict(:room_type => "Private room"), df, no_rules) == (5, 5)
+
+        # 4. a fixed minimum and a maximum from the data can be mixed
+        rule_guests = (column = :accommodates, value_type = Int, min = 1, max = nothing)
+        @test P.input_bounds(rule_guests, entire, df, no_rules) == (1, 6)
+
+        # 5. a plausibility rule limits the maximum by an earlier answer
+        # only the rules whose column is the question count: the bathrooms question ignores the bedrooms rule
+        rules = [(column = :bathrooms, max_of = :bedrooms,     factor = 1.0, offset = 2.0),
+                 (column = :bedrooms,  max_of = :accommodates, factor = 1.0, offset = 0.0),
+                 (column = :beds,      max_of = :accommodates, factor = 1.5, offset = 0.0)]
+        rule_bathrooms = (column = :bathrooms, value_type = Float64, min = 0.5, max = nothing)
+        # 1 bedroom: at most 1 + 2 = 3 bathrooms, although the data goes up to 6.0
+        @test P.input_bounds(rule_bathrooms, Dict(:room_type => "Entire home/apt", :bedrooms => 1), df, rules) == (0.5, 3.0)
+        # 2 guests: at most 2 bedrooms, although the data goes up to 3
+        @test P.input_bounds(rule_bedrooms, Dict(:room_type => "Entire home/apt", :accommodates => 2), df, rules) == (1, 2)
+
+        # 6. a limit above the data maximum does not raise the maximum
+        @test P.input_bounds(rule_bathrooms, Dict(:room_type => "Entire home/apt", :bedrooms => 10), df, rules) == (0.5, 6.0)
+
+        # 7. whole-number questions are rounded inwards: the minimum up, the maximum down
+        # 3 guests: 1.5 * 3 = 4.5 beds at most, which becomes 4; the minimum 1.2 becomes 2
+        rule_beds = (column = :beds, value_type = Int, min = 1.2, max = nothing)
+        lo, hi = P.input_bounds(rule_beds, Dict(:room_type => "Entire home/apt", :accommodates => 3), df, rules)
+        @test (lo, hi) == (2, 4)
+        @test lo isa Int
+        @test hi isa Int
+
+        # 8. error cases: the earlier answer is missing, or the room type does not exist
+        @test_throws ArgumentError P.input_bounds(rule_bathrooms, entire, df, rules)
+        @test_throws ArgumentError P.input_bounds(rule_bedrooms, Dict(:room_type => "Hotel room"), df, no_rules)
+    end
+
     @testset "compute_caps" begin
         # 1. the cap rule, written here so the test does not depend on CONFIG
         # the quantile is 0.75 instead of 0.995 so that the expected caps are easy to count by hand; the code is the same
