@@ -1273,10 +1273,9 @@ const P = Project1
     end
 
     @testset "assess_listing" begin 
-                lower = 66.0
+        lower = 66.0
         upper = 140.0
         reference = 0.6
-
         cases = [
             # status                current   occupancy   expected difference
             (:underpriced,          50.0,     0.8,        16.0),     # below the range, well booked
