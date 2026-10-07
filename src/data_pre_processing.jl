@@ -1170,9 +1170,9 @@ julia> dummies = Project1.selection_to_dummies([:has_tv], [:has_AC, :has_tv, :ha
 
 julia> [dummies[:has_AC], dummies[:has_tv], dummies[:has_pool]]
 3-element Vector{Int64}:
-0
-1
-0
+ 0
+ 1
+ 0
 
 julia> Project1.selection_to_dummies([:has_ac], [:has_AC, :has_tv])
 ERROR: ArgumentError: input values not a subset of dummies
