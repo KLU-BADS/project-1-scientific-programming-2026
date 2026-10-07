@@ -1166,11 +1166,13 @@ Returns a `Dict{Symbol,Int}` with one entry per column of `dummy_columns`; `merg
 
 # Examples
 ```jldoctest
-julia> sort(collect(Project1.selection_to_dummies([:has_tv], [:has_AC, :has_tv, :has_pool])))
-3-element Vector{Pair{Symbol, Int64}}:
-  :has_AC => 0
- :has_pool => 0
-   :has_tv => 1
+   julia> dummies = Project1.selection_to_dummies([:has_tv], [:has_AC, :has_tv, :has_pool]);
+
+   julia> [dummies[:has_AC], dummies[:has_tv], dummies[:has_pool]]
+   3-element Vector{Int64}:
+    0
+    1
+    0
 
 julia> Project1.selection_to_dummies([:has_ac], [:has_AC, :has_tv])
 ERROR: ArgumentError: input values not a subset of dummies
@@ -1185,4 +1187,10 @@ function selection_to_dummies(selected_dummies::AbstractVector{Symbol}, dummy_co
         dummies[column] = column in selected_dummies ? 1 : 0
     end
     return dummies
+end
+
+function derive_district(latitude::Real, longitude::Real, df_training::DataFrame, distance_rule::NamedTuple)
+    tmp = df_training[:, [:latitude, :longitude, :district]] (a copy).
+calculate_distance!(tmp, merge(distance_rule, (target = :d, delete = false)), (latitude = latitude, longitude = longitude)): the user's point is the "centre".
+return String(tmp.district[argmin(tmp.d)])
 end
