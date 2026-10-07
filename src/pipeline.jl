@@ -28,6 +28,9 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
     denominators = unique(Symbol[rule.denominator for rule in CONFIG.ratio_rules if rule.denominator isa Symbol])
     remove_if_zero!(df, denominators)
     process_outliers!(df, CONFIG.outlier_rules)
+    remove_implausible!(df, CONFIG.plausibility_rules)
+    caps = compute_caps(df, CONFIG.cap_rules)
+    cap_values!(df, caps, CONFIG.cap_rules)
     for rule in CONFIG.dummy_rules
         format_dummies!(df, rule)
     end
@@ -35,17 +38,14 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
         calculate_ratio!(df, rule)
     end
     calculate_distance!(df, CONFIG.distance_rule, CONFIG.cities[CONFIG.city].center)
-    # 1. the values learned from the training data
-    # the new steps (caps, rare districts, squares) will fill these; until they are implemented the values are empty placeholders
-    # TODO: replace the placeholders with the results of compute_caps, kept_categories and square_center
-    fitted = (
-        caps = Dict{Tuple{String,Symbol},Float64}(),
-        kept_districts = String[],
-        square_centers = Dict{Symbol,Float64}(),
-    )
-    # 2. return the cleaned table together with the learned values
-    # a named tuple lets the caller write result.df and result.fitted
-    return (df = df, fitted = fitted)
+    kept = kept_categories(df, CONFIG.category_rule)
+    group_rare_categories!(df, CONFIG.category_rule, kept)
+    centers = Dict{Symbol,Float64}()
+    for rule in CONFIG.square_rules
+        centers[rule.source] = square_center(df, rule)
+        calculate_square!(df, rule, centers[rule.source])
+    end
+    return (df = df, fitted = (caps = caps, kept_districts = kept, square_centers = centers))
 end
 
 """
