@@ -1215,7 +1215,26 @@ const P = Project1
         @test P.coefnames(fit_other.model) == ["(Intercept)", "cat: B", "cat: C"]
     end
 
-     @testset "get_r2" begin
+    @testset "get_fit" begin
+        # 1. two made-up fits, only the name inside the spec matters for get_fit
+        fit_a = (spec = (name = :a,), model = "model a")
+        fit_b = (spec = (name = :b,), model = "model b")
+        fits = [fit_a, fit_b]
+
+        # 2. a fit is found by its name, not by its position
+        @test P.get_fit(fits, :a) === fit_a
+        @test P.get_fit(fits, :b) === fit_b
+        @test P.get_fit(reverse(fits), :b) === fit_b
+        # the order of the list does not matter
+
+        # 3. error case: a name that does not exist
+        @test_throws ArgumentError P.get_fit(fits, :c)
+
+        # 4. the error message lists the available names
+        @test_throws "available names: :a, :b" P.get_fit(fits, :c)
+    end
+
+    @testset "get_r2" begin
         
         # real values vector
         y1 = [1, 2, 3, 4]
