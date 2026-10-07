@@ -1642,5 +1642,84 @@ const P = Project1
         result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
         @test isnothing(result)
     end
+
+    @testset "ask_yes_no" begin
+        # How these tests work:
+        # IOBuffer("y\n") simulates user typed y and pressed Enter.
+        # ("maybe\nn\n") simulates several consecutive answers.
+        # Empty IOBuffer() catches everything the function prints,
+        # so to compare with expected message using String(take!(...)).
+
+        # 1. "y" means yes: the result is true (a Bool)
+        user_input = IOBuffer("y\n")
+        printed = IOBuffer()
+        result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test result == true
+        @test result isa Bool
+
+        # 2. "n" means no: the result is false
+        user_input = IOBuffer("n\n")
+        printed = IOBuffer()
+        result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test result == false
+
+        # 3. The prompt is shown to the user
+        user_input = IOBuffer("y\n")
+        printed = IOBuffer()
+        P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test startswith(String(take!(printed)), "Continue? ")
+
+        # 4. All accepted yes-words give true ...
+        for yes_word in ["y", "yes", "t", "true"]
+            user_input = IOBuffer(yes_word * "\n")
+            printed = IOBuffer()
+            @test P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed) == true
+        end
+
+        # ... and all accepted no-words give false
+        for no_word in ["n", "no", "f", "false"]
+            user_input = IOBuffer(no_word * "\n")
+            printed = IOBuffer()
+            @test P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed) == false
+        end
+
+        # 5. Upper case and spaces around the answer are ignored
+        user_input = IOBuffer("  YES  \n")
+        printed = IOBuffer()
+        result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test result == true
+
+        # 6. An invalid answer: the function shows a hint and asks again
+        #    First answer "maybe" is invalid, second answer "n" is valid
+        user_input = IOBuffer("maybe\nn\n")
+        printed = IOBuffer()
+        result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test result == false
+        @test occursin("Please answer y or n.", String(take!(printed)))
+
+        # 7. Just pressing Enter (empty answer) is not accepted: the function asks again
+        user_input = IOBuffer("\ny\n")
+        printed = IOBuffer()
+        result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test result == true
+
+        # 8. The user cancels with q, quit or exit (upper or lower case): the result is nothing
+        for cancel_word in ["q", "quit", "EXIT"]
+            user_input = IOBuffer(cancel_word * "\n")
+            printed = IOBuffer()
+            result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+            @test isnothing(result)
+        end
+
+        # 9. The input ends before a valid answer was given: the result is nothing
+        #    (instead of waiting forever)
+        user_input = IOBuffer("")                       # no input at all
+        printed = IOBuffer()
+        @test isnothing(P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed))
+
+        user_input = IOBuffer("maybe\n")                # only one invalid answer, then nothing more
+        printed = IOBuffer()
+        @test isnothing(P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed))
+    end
 end
  
