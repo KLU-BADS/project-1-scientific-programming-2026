@@ -1188,9 +1188,3 @@ function selection_to_dummies(selected_dummies::AbstractVector{Symbol}, dummy_co
     end
     return dummies
 end
-
-function derive_district(latitude::Real, longitude::Real, df_training::DataFrame, distance_rule::NamedTuple)
-    tmp = df_training[:, [:latitude, :longitude, :district]] (a copy).
-calculate_distance!(tmp, merge(distance_rule, (target = :d, delete = false)), (latitude = latitude, longitude = longitude)): the user's point is the "centre".
-return String(tmp.district[argmin(tmp.d)])
-end
