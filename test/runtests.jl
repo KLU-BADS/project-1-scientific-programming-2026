@@ -1029,6 +1029,25 @@ const P = Project1
         # (4.5 - 4.8)^2 = 0.09 and (5.0 - 4.8)^2 = 0.04; ≈ because decimals are not stored exactly
 
     end
+
+    @testset "get_amenity_columns" begin
+        # own small rule list, so the test does not depend on CONFIG
+        rules = [
+            (source = :amenities,    target = :has_AC,       keywords = ["air conditioning"], delete = false),
+            (source = :is_superhost, target = :is_superhost, keywords = ["t"],                delete = false),
+            (source = :amenities,    target = :has_tv,       keywords = ["tv"],               delete = false),
+        ]
+
+        # 1. only the targets of amenity rules, in the order of the rules
+        @test P.get_amenity_columns(rules) == [:has_AC, :has_tv]
+
+        # 2. the result is a list of column names (Symbols)
+        @test eltype(P.get_amenity_columns(rules)) == Symbol
+
+        # 3. no amenity rule: empty list
+        @test isempty(P.get_amenity_columns([(source = :is_superhost, target = :is_superhost, keywords = ["t"], delete = false)]))
+    end
+
     # ------------------------------------------------------------------------------------------
     # data_analysis.jl
     # ------------------------------------------------------------------------------------------

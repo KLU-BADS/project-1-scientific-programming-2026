@@ -1111,3 +1111,37 @@ function calculate_square!(df::DataFrame, rule::NamedTuple, center::Real)
     # Return Data 
     return df
 end
+
+"""
+    amenity_columns(dummy_rules) -> Vector{Symbol}
+
+Return the names of the amenity columns: the `target` of every dummy rule whose `source` is `:amenities`.
+The amenities menu is built from this list, so it always offers exactly the amenities the model uses.
+
+# Arguments
+- `dummy_rules::AbstractVector{<:NamedTuple}`:  the dummy rules, e.g. `CONFIG.dummy_rules`; each rule has the fields
+                                                `source` and `target`.
+
+Returns the column names in the order of the rules, e.g. `[:has_balcony, :has_AC, ...]`.
+Rules with another source (e.g. `:is_superhost`) are left out. Returns an empty list if there is no amenity rule.
+
+# Examples
+```jldoctest
+julia> rules = [(source = :amenities, target = :has_AC), (source = :is_superhost, target = :is_superhost),
+                (source = :amenities, target = :has_tv)];
+
+julia> Project1.amenity_columns(rules)
+2-element Vector{Symbol}:
+ :has_AC
+ :has_tv
+```
+"""
+function get_amenity_columns(dummy_rules::AbstractVector{<:NamedTuple})
+    col = Symbol[]
+    # get a vector of all the amenities based on the dummy rules config
+    for rule in dummy_rules
+        if rule.source == :amenities
+            push!(col, rule.target)
+        end
+    end
+    return columns
