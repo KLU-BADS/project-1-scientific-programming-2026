@@ -1146,3 +1146,43 @@ function get_amenity_columns(dummy_rules::AbstractVector{<:NamedTuple})
     end
     return columns
 end
+
+"""
+    selection_to_dummies(selected_dummies, dummy_columns) -> Dict{Symbol,Int}
+
+Turn the amenities ticked in the menu into one 0/1 value per amenity column, as the model expects them.
+Every column of `dummy_columns` gets an entry: 1 if it is in `selected_dummies`, 0 if not.
+
+# Arguments
+- `selected_dummies::AbstractVector{Symbol}`:   the columns the user ticked, as returned by `ask_multiple`,
+                                                e.g. `[:has_AC, :has_tv]`; empty if nothing was ticked.
+- `dummy_columns::AbstractVector{Symbol}`:      all amenity columns, e.g. from `get_amenity_columns(CONFIG.dummy_rules)`.
+
+# Throws
+- `ArgumentError`   if `selected_dummies` contains a value that is not in `dummy_columns`.
+- `MethodError`     if one of the lists does not contain Symbols, e.g. texts or an untyped empty list `[]`.
+
+Returns a `Dict{Symbol,Int}` with one entry per column of `dummy_columns`; `merge!` adds it to the answers.
+
+# Examples
+```jldoctest
+julia> sort(collect(Project1.selection_to_dummies([:has_tv], [:has_AC, :has_tv, :has_pool])))
+3-element Vector{Pair{Symbol, Int64}}:
+  :has_AC => 0
+ :has_pool => 0
+   :has_tv => 1
+
+julia> Project1.selection_to_dummies([:has_ac], [:has_AC, :has_tv])
+ERROR: ArgumentError: input values not a subset of dummies
+```
+"""
+function selection_to_dummies(selected_dummies::AbstractVector{Symbol}, dummy_columns::AbstractVector{Symbol})
+    # throw exception if the selected columns are not a subset of columns
+    issubset(selected_dummies, dummy_columns) || throw(ArgumentError("input values not a subset of dummies"))
+    dummies = Dict{Symbol,Int}()
+    # every amenity column gets a value: 1 if the user ticked it, 0 if not
+    for column in dummy_columns
+        dummies[column] = column in selected_dummies ? 1 : 0
+    end
+    return dummies
+end

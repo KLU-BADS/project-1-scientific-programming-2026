@@ -1048,6 +1048,34 @@ const P = Project1
         @test isempty(P.get_amenity_columns([(source = :is_superhost, target = :is_superhost, keywords = ["t"], delete = false)]))
     end
 
+        @testset "selection_to_dummies" begin
+        columns = [:has_AC, :has_tv, :has_pool]
+
+        # 1. selected columns get 1, all others 0
+        @test P.selection_to_dummies([:has_tv], columns) == Dict(:has_AC => 0, :has_tv => 1, :has_pool => 0)
+
+        # 2. nothing selected: every column 0, none left out
+        result = P.selection_to_dummies(Symbol[], columns)
+        @test length(result) == 3
+        @test all(value == 0 for value in values(result))
+
+        # 3. everything selected: every column 1
+        @test all(value == 1 for value in values(P.selection_to_dummies(columns, columns)))
+
+        # 4. the order of the selection does not matter
+        @test P.selection_to_dummies([:has_pool, :has_AC], columns) == P.selection_to_dummies([:has_AC, :has_pool], columns)
+
+        # 5. the result has the promised type (merge! copies it into the answers)
+        @test result isa Dict{Symbol,Int}
+
+        # 6. a selected value that is not a column is refused (here a typo: small c)
+        @test_throws ArgumentError P.selection_to_dummies([:has_ac], columns)
+
+        # 7. lists that are not Symbols do not match the signature
+        @test_throws MethodError P.selection_to_dummies(["TV"], columns)
+        @test_throws MethodError P.selection_to_dummies([], columns)     # [] is a Vector{Any}
+    end
+
     # ------------------------------------------------------------------------------------------
     # data_analysis.jl
     # ------------------------------------------------------------------------------------------
