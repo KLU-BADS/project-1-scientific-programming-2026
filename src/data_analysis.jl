@@ -236,6 +236,37 @@ function regression_city(df_training::DataFrame, spec::NamedTuple; reference_lev
     return (spec = spec, model = model, smearing = smearing)
 end
 
+"""
+    get_fit(fits::AbstractVector, name::Symbol) -> NamedTuple
+
+Find a fitted model by its name.
+
+Each fit is the result of `regression_city()` and carries its spec, including the `name` from `CONFIG.regression_models`. Looking a model up by name keeps working when someone reorders the models; `fits[1]` would silently pick the wrong one.
+
+# Arguments
+- `fits::AbstractVector`:   Fits, the `fits` part of the result of `run_analysis_pipeline`.
+- `name::Symbol`:           Name of the model, e.g. `:price`.
+
+# Throws
+- `ArgumentError` if no fit has this name; the message lists the available names.
+
+Returns the fit with this name.
+"""
+function get_fit(fits::AbstractVector, name::Symbol)
+    # 1. the position of the first fit with this name
+    # every fit carries its spec, and the spec carries the name
+    i = findfirst(fit -> fit.spec.name == name, fits)
+
+    # 2. a name that does not exist is an error
+    # listing the available names helps to find a typo
+    if i === nothing
+        available = join([":" * string(fit.spec.name) for fit in fits], ", ")
+        throw(ArgumentError("no fit named :$name, available names: $available"))
+    end
+
+    # 3. return the fit
+    return fits[i]
+end
 
 """
     predict_apartment_performance(fit, df_new) -> Vector
