@@ -872,6 +872,8 @@ end
 
 Compute the value that `calculate_square!` subtracts before squaring a column.
 
+Throws MissingException if the rule.source column contains missing values 
+
 If `rule.center` is `true`, this is the mean of the `rule.source` column, so the
 squared term measures distance from the typical listing. If `rule.center` is
 `false`, it is `0.0`, so the column is squared as it is. Run it once on the
@@ -902,9 +904,7 @@ function square_center(df::DataFrame, rule::NamedTuple)
     # 1. Get the column 
     values = df[!, rule.source]
     # 2. Check for missing values 
-     if any(ismissing, values)
-        error("Value is missing in column $(rule.source)")
-    end
+    any(ismissing, values) && throw(MissingException("column $(rule.source) contains missing values"))
     # 3. Branch on the rule.center flag
     # Statistics package is necessary
     if rule.center

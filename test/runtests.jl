@@ -832,6 +832,10 @@ const P = Project1
         rule_2 = (source = :review_scores_rating, target = :rating_sq, center = true)
        
         @test P.square_center(df_2, rule_2) ≈ 7/3
+
+        # 3. add test to check if the MissingException is thrown
+        df_3 = DataFrame(accommodates = [2, missing, 6])
+        @test_throws MissingException P.square_center(df_3, rule)
     end 
 
     @testset "calculate_square!" begin
@@ -864,6 +868,24 @@ const P = Project1
         @test_throws ErrorException P.calculate_square!(df_3, rule, 4.0)
 
         @test names(df_3) == ["accommodates"]
+
+        # 7. the center comes from training data and is reused on new table
+        df_train = DataFrame(accommodates = [2, 4, 6])
+        center = P.square_center(df_train, rule)
+        # center is 4.0, the mean of the training table
+        df_user = DataFrame(accommodates = [3])
+        # one row, like the user's apartment at prediction time
+        P.calculate_square!(df_user, rule, center)
+        
+        @test df_user.accommodates_sq == [1.0]
+        # (3 - 4)^2 = 1.0; if the function used the mean of its own table (3), the result would be 0.0
+
+        # 8. a decimal centre, as for the rating
+        rating_rule = (source = :review_scores_rating, target = :rating_sq, center = true)
+        df_rating = DataFrame(review_scores_rating = [4.5, 5.0])
+        P.calculate_square!(df_rating, rating_rule, 4.8)
+        @test df_rating.rating_sq ≈ [0.09, 0.04]
+        # (4.5 - 4.8)^2 = 0.09 and (5.0 - 4.8)^2 = 0.04; ≈ because decimals are not stored exactly
     end
     # ------------------------------------------------------------------------------------------
     # data_analysis.jl
