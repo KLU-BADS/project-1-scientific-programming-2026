@@ -903,3 +903,109 @@ function group_rare_categories!(df::DataFrame, rule::NamedTuple, kept::Vector{St
     # 4. give the table back
     return df
 end 
+
+"""
+    square_center(df::DataFrame, rule::NamedTuple) -> Float64
+
+Compute the value that `calculate_square!` subtracts before squaring a column.
+
+Throws MissingException if the rule.source column contains missing values 
+
+If `rule.center` is `true`, this is the mean of the `rule.source` column, so the
+squared term measures distance from the typical listing. If `rule.center` is
+`false`, it is `0.0`, so the column is squared as it is. Run it once on the
+training data and reuse the result for prediction data.
+
+# Arguments
+- `df::DataFrame`: the training data containing the `rule.source` column.
+- `rule::NamedTuple`: one square rule with the fields `source`, `target` and `center`.
+
+Returns the centering value as a `Float64`.
+
+# Examples
+```jldoctest
+julia> using DataFrames
+
+julia> df = DataFrame(accommodates = [2, 4, 6]);
+
+julia> rule = (source = :accommodates, target = :accommodates_sq, center = true);
+
+julia> Project1.square_center(df, rule)
+4.0
+
+julia> Project1.square_center(df, merge(rule, (center = false,)))
+0.0
+```
+"""
+function square_center(df::DataFrame, rule::NamedTuple)
+    # 1. Get the column 
+    values = df[!, rule.source]
+    # 2. Check for missing values 
+    any(ismissing, values) && throw(MissingException("column $(rule.source) contains missing values"))
+    # 3. Branch on the rule.center flag
+    # Statistics package is necessary
+    if rule.center
+        return mean(values)
+    else 
+        return 0.0 
+    end 
+end 
+
+"""
+    calculate_square!(df::DataFrame, rule::NamedTuple, center::Real) -> DataFrame
+
+Add a squared version of a column to `df`, in place.
+
+The new column `rule.target` is `(rule.source - center)^2` for every row. The
+`center` comes from `square_center`, which is computed once on the training data,
+so training and prediction data are transformed the same way. The source column
+is kept, and no rows are removed.
+
+# Arguments
+- `df::DataFrame`: the data containing the `rule.source` column.
+- `rule::NamedTuple`: one square rule with the fields `source`, `target` and `center`.
+- `center::Real`: the value subtracted before squaring (from `square_center`).
+
+Returns the modified `df`. Throws an error if the `rule.source` column contains
+missing values.
+
+# Examples
+```jldoctest
+julia> using DataFrames
+
+julia> df = DataFrame(accommodates = [2, 4, 6]);
+
+julia> rule = (source = :accommodates, target = :accommodates_sq, center = true);
+
+julia> Project1.calculate_square!(df, rule, 4.0);
+
+julia> df.accommodates_sq
+3-element Vector{Float64}:
+ 4.0
+ 0.0
+ 4.0
+
+julia> df2 = DataFrame(accommodates = [2, 4, 6]);
+
+julia> Project1.calculate_square!(df2, rule, 0.0);
+
+julia> df2.accommodates_sq
+3-element Vector{Float64}:
+  4.0
+ 16.0
+ 36.0
+```
+"""
+function calculate_square!(df::DataFrame, rule::NamedTuple, center::Real)
+    # 1. Get source column
+    values = df[!, rule.source]
+    # 2. Check for missing values 
+    any(ismissing, values) && throw(MissingException("column $(rule.source) contains missing values"))
+    # 3. Compute Squared Values 
+    result = values .- center 
+    squared_result = result .^2
+    # 4. Store as new column 
+    df[!, rule.target] = squared_result
+    # Return Data 
+    return df
+end
