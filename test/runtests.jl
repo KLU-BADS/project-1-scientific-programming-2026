@@ -865,7 +865,7 @@ const P = Project1
         # 6. missing values raise an error and data frame gets no new column 
         df_3 = DataFrame(accommodates = [2, missing, 6])
 
-        @test_throws ErrorException P.calculate_square!(df_3, rule, 4.0)
+        @test_throws MissingException P.calculate_square!(df_3, rule, 4.0)
 
         @test names(df_3) == ["accommodates"]
 
@@ -886,6 +886,7 @@ const P = Project1
         P.calculate_square!(df_rating, rating_rule, 4.8)
         @test df_rating.rating_sq ≈ [0.09, 0.04]
         # (4.5 - 4.8)^2 = 0.09 and (5.0 - 4.8)^2 = 0.04; ≈ because decimals are not stored exactly
+
     end
     # ------------------------------------------------------------------------------------------
     # data_analysis.jl
