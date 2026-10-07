@@ -1270,8 +1270,31 @@ const P = Project1
         # test if function throws error for missing values
         y_hat = [4, missing, 2, 1]
         @test_throws MissingException P.get_r2(y1,y_hat) 
-     end
+    end
 
+    @testset "assess_listing" begin 
+                lower = 66.0
+        upper = 140.0
+        reference = 0.6
+
+        cases = [
+            # status                current   occupancy   expected difference
+            (:underpriced,          50.0,     0.8,        16.0),     # below the range, well booked
+            (:not_price_problem,    50.0,     0.3,        16.0),     # below the range, rarely booked
+            (:in_line,              100.0,    0.8,        0.0),      # inside the range
+            (:overpriced,           160.0,    0.3,        20.0),     # above the range, rarely booked
+            (:unexplained_premium,  160.0,    0.8,        20.0),     # above the range, well booked
+            (:in_line,              66.0,     0.3,        0.0),      # exactly on the lower bound counts as inside
+            (:in_line,              140.0,    0.8,        0.0),      # exactly on the upper bound counts as inside
+        ]
+
+        for (expected_status, current, occupancy, expected_difference) in cases
+            result = P.assess_listing(current, lower, upper, occupancy, reference)
+            @test result.status == expected_status
+            @test result.difference == expected_difference
+        end 
+
+    end
     # ------------------------------------------------------------------------------------------
     # visualization.jl
     # ------------------------------------------------------------------------------------------
