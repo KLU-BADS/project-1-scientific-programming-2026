@@ -517,6 +517,46 @@ end
 
 
 """
+    occupancy_reference(df_training::DataFrame, district::AbstractString, room_type::AbstractString, rule::NamedTuple; q::Real = 0.5) -> Float64
+
+Occupancy rate of comparable listings in the training data.
+
+Comparable means the same district and the same room type. If there are fewer than `rule.min_count` such listings, all listings of the same room type are used instead. The value is used for the revenue of a new apartment (median, `q = 0.5`) and as the yardstick for "high occupancy" (`q = rule.high_quantile`).
+
+# Arguments
+- `df_training::DataFrame`:     Training data with the columns `district`, `room_type` and `occupancy_rate`.
+- `district::AbstractString`:   District of the apartment.
+- `room_type::AbstractString`:  Room type of the apartment.
+- `rule::NamedTuple`:           `CONFIG.occupancy_rule`; `min_count` is the smallest group that is used on its own.
+- `q::Real`:                    Quantile to return, 0.5 is the median.
+
+# Throws
+- `ArgumentError` if the training data has no listing with this room type.
+
+Returns the occupancy rate as a `Float64`.
+"""
+function occupancy_reference(df_training::DataFrame, district::AbstractString, room_type::AbstractString, rule::NamedTuple; q::Real = 0.5)
+    # 1. the listings with the same district and room type
+    # .== compares every row with the value, & keeps the rows where both comparisons are true
+    rows = df_training[(df_training.district .== district) .& (df_training.room_type .== room_type), :]
+
+    # 2. too few listings: use all listings of the same room type
+    # a group with exactly min_count rows is still used on its own (test 2)
+    if nrow(rows) < rule.min_count
+        rows = df_training[df_training.room_type .== room_type, :]
+    end
+
+    # 3. a room type that does not exist is an error
+    # without this check quantile would stop with a less helpful message
+    if nrow(rows) == 0
+        throw(ArgumentError("no listings with room type \"$room_type\""))
+    end
+
+    # 4. the quantile of the occupancy rate, q = 0.5 is the median
+    return Float64(quantile(rows.occupancy_rate, q))
+end
+
+"""
     assess_listing(current::Real, lower::Real, upper::Real, occupancy::Real, reference::Real) -> NamedTuple
 
 Compare the current price of a listed apartment with its predicted price range.
@@ -562,42 +602,3 @@ function assess_listing(current::Real, lower::Real, upper::Real, occupancy::Real
     difference = 0.0
     return (status = status, difference = difference)
 end 
-"""
-    occupancy_reference(df_training::DataFrame, district::AbstractString, room_type::AbstractString, rule::NamedTuple; q::Real = 0.5) -> Float64
-
-Occupancy rate of comparable listings in the training data.
-
-Comparable means the same district and the same room type. If there are fewer than `rule.min_count` such listings, all listings of the same room type are used instead. The value is used for the revenue of a new apartment (median, `q = 0.5`) and as the yardstick for "high occupancy" (`q = rule.high_quantile`).
-
-# Arguments
-- `df_training::DataFrame`:     Training data with the columns `district`, `room_type` and `occupancy_rate`.
-- `district::AbstractString`:   District of the apartment.
-- `room_type::AbstractString`:  Room type of the apartment.
-- `rule::NamedTuple`:           `CONFIG.occupancy_rule`; `min_count` is the smallest group that is used on its own.
-- `q::Real`:                    Quantile to return, 0.5 is the median.
-
-# Throws
-- `ArgumentError` if the training data has no listing with this room type.
-
-Returns the occupancy rate as a `Float64`.
-"""
-function occupancy_reference(df_training::DataFrame, district::AbstractString, room_type::AbstractString, rule::NamedTuple; q::Real = 0.5)
-    # 1. the listings with the same district and room type
-    # .== compares every row with the value, & keeps the rows where both comparisons are true
-    rows = df_training[(df_training.district .== district) .& (df_training.room_type .== room_type), :]
-
-    # 2. too few listings: use all listings of the same room type
-    # a group with exactly min_count rows is still used on its own (test 2)
-    if nrow(rows) < rule.min_count
-        rows = df_training[df_training.room_type .== room_type, :]
-    end
-
-    # 3. a room type that does not exist is an error
-    # without this check quantile would stop with a less helpful message
-    if nrow(rows) == 0
-        throw(ArgumentError("no listings with room type \"$room_type\""))
-    end
-
-    # 4. the quantile of the occupancy rate, q = 0.5 is the median
-    return Float64(quantile(rows.occupancy_rate, q))
-end
