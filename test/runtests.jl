@@ -1464,6 +1464,35 @@ const P = Project1
         output = String(take!(io))
         @test occursin("NEW LISTING", output)
         @test !occursin("▲", output)
+
+        # 3. happy path: a listed apartment shows the assessment and the revenue with its range
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("Your price €150 is above the range by €10", output)
+        @test occursin("possibly overpriced", output)
+        @test occursin("Revenue at €101 × your 72 nights   €7,272", output)
+        @test occursin("range €4,752 to €10,080", output)
+
+        # 4. edge case: a new apartment gets no assessment and only a rough revenue estimate
+        io = IOBuffer()
+        P.visualize_results(new; io = io)
+        output = String(take!(io))
+        @test occursin("Expected revenue (rough estimate)   €7,272", output)
+        @test !occursin("Your price", output)
+
+        # 5. edge case: a price inside the range is in line
+        in_line = merge(listed, (current_price = 100.0, assessment = (status = :in_line, difference = 0.0)))
+        io = IOBuffer()
+        P.visualize_results(in_line; io = io)
+        output = String(take!(io))
+        @test occursin("Your price €100 is inside the range", output)
+        @test occursin("in line with comparable listings", output)
+
+        # 6. error case: an unknown status is rejected instead of printing a wrong message
+        unknown = merge(listed, (assessment = (status = :cheap, difference = 5.0),))
+        @test_throws KeyError P.visualize_results(unknown; io = IOBuffer())
+        # :cheap is not one of the five statuses, so the Dict lookup throws a KeyError
     end
 
     # ------------------------------------------------------------------------------------------

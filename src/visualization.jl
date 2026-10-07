@@ -268,5 +268,42 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
     # for a new apartment current_price is nothing, so range_bar draws no ▲
     println(io)
 
+    # 4. listed apartments only: how the current price compares with the range, with a coloured message
+    if result.group == :listed && !isnothing(result.assessment)
+        status = result.assessment.status
+        current = format_eur(result.current_price)
+        difference = format_eur(result.assessment.difference)
+        if status in (:underpriced, :not_price_problem)
+            println(io, "Your price $current is below the range by $difference")
+        elseif status in (:overpriced, :unexplained_premium)
+            println(io, "Your price $current is above the range by $difference")
+        else
+            println(io, "Your price $current is inside the range")
+        end
+        # the status says where the price is: two statuses below the range, two above, :in_line inside
+
+        messages = Dict(
+            :underpriced         => ("probably underpriced; demand is strong at your price", :green),
+            :in_line             => ("in line with comparable listings", :green),
+            :not_price_problem   => ("cheap but few bookings; check photos, description, visibility", :yellow),
+            :overpriced          => ("possibly overpriced", :red),
+            :unexplained_premium => ("guests pay more than the model expects; no action", :default),
+        )
+        message, color = messages[status]
+        printstyled(io, message, "\n"; color = color)
+        # every status has one sentence and one colour; an unknown status stops with a KeyError
+        println(io)
+    end
+
+    # 5. revenue: the mean price times the booked nights per year
+    if result.group == :listed
+        println(io, "Revenue at ", format_eur(result.price.mean), " × your ", round(Int, result.nights), " nights   ", format_eur(result.revenue.estimate))
+        println(io, "  range ", format_eur(result.revenue.lower), " to ", format_eur(result.revenue.upper))
+    else
+        println(io, "Expected revenue (rough estimate)   ", format_eur(result.revenue.estimate))
+    end
+    # a new apartment has no booking history, so its nights are only a guess and no range is shown
+    println(io)
+
     return nothing
 end
