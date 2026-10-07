@@ -249,3 +249,39 @@ function ask_location(df_training::DataFrame, distance_rule::NamedTuple, locatio
         return (latitude = latitude_input, longitude = longitude_input)
     end
 end
+
+"""
+    ask_numbers!(answers, rules, df_training, plausibility_rules; io_in = stdin, io_out = stdout) -> Bool
+
+Ask the numeric questions about the apartment one after another and store each answer in `answers`.
+The limits of every question come from `input_bounds`: the fixed limits of the rule or, if they are `nothing`,
+the range of the training data for the chosen room type, tightened by the plausibility rules
+(e.g. the number of bathrooms depends on the number of bedrooms entered before).
+
+# Arguments
+- `answers::AbstractDict{Symbol,Any}`:                  answers so far; must already contain `:room_type`.
+                                                        Changed in place: each answer is stored under its column name.
+- `rules::AbstractVector{<:NamedTuple}`:                the questions in the order they are asked, e.g. the entries of
+                                                        `CONFIG.input_rules` for one group. Each rule has the fields
+                                                        `column`, `value_type`, `min`, `max` and `prompt`.
+- `df_training::DataFrame`:                             training data, used for the limits of the room type.
+- `plausibility_rules::AbstractVector{<:NamedTuple}`:   e.g. `CONFIG.plausibility_rules`; limits that depend on earlier answers.
+- `io_in::IO`:                                          input stream (default `stdin`); pass an `IOBuffer` in tests.
+- `io_out::IO`:                                         output stream for the prompts and messages (default `stdout`).
+
+Returns `true` when every question was answered, or `false` as soon as the user enters `q`, `quit` or `exit`
+or the input ends. The answers given until then stay in `answers`.
+
+The order of `rules` matters: a question whose limits depend on another answer (bathrooms on bedrooms)
+must come after it.
+"""
+function ask_numbers!(answers::AbstractDict{Symbol,Any}, rules::AbstractVector{<:NamedTuple}, df_training::DataFrame, plausibility_rules::AbstractVector{<:NamedTuple}; io_in::IO = stdin, io_out::IO = stdout)
+    # for each number input governed by an interval get the boundaries and then get the user input, if the input is correct add the user response to answers Dict
+    for rule in rules
+        (lower_bound, upper_bound) = input_bounds(rule, answers, df_training, plausibility_rules)
+        value = ask_number(rule.prompt, rule.value_type, lower_bound, upper_bound, true; io_in = io_in, io_out = io_out)
+        isnothing(value) && return false
+        answers[rule.column] = value
+    end
+    return true
+end

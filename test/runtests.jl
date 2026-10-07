@@ -1945,5 +1945,63 @@ const P = Project1
         @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("37.99\nexit\n"), io_out = IOBuffer()))
         @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer(""), io_out = IOBuffer()))
     end
+
+    @testset "ask_numbers!" begin
+        # tiny training data with two room types; only the limits are taken from it
+        df = DataFrame(room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room", "Private room"],
+                       accommodates = [2, 4, 6, 1, 2],
+                       bedrooms     = [1, 2, 3, 1, 1],
+                       bathrooms    = [1.0, 1.5, 2.0, 1.0, 1.0])
+        # own rules, so the tests do not depend on CONFIG
+        rules = [
+            (column = :accommodates, value_type = Int,     min = 1,       max = nothing, prompt = "Guests: ",    groups = [:new, :listed]),
+            (column = :bedrooms,     value_type = Int,     min = nothing, max = nothing, prompt = "Bedrooms: ",  groups = [:new, :listed]),
+            (column = :bathrooms,    value_type = Float64, min = 0.5,     max = nothing, prompt = "Bathrooms: ", groups = [:new, :listed]),
+        ]
+        plausibility = [
+            (column = :bedrooms,  max_of = :accommodates, factor = 1.0, offset = 0.0),
+            (column = :bathrooms, max_of = :bedrooms,     factor = 1.0, offset = 2.0),
+        ]
+        new_answers(room_type) = Dict{Symbol,Any}(:room_type => room_type)
+
+        # 1. all questions answered: true, every answer stored under its column with the right type
+        answers = new_answers("Entire home/apt")
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("4\n2\n1.5\n"), io_out = IOBuffer())
+        @test answers[:accommodates] == 4 && answers[:accommodates] isa Int
+        @test answers[:bedrooms] == 2
+        @test answers[:bathrooms] == 1.5 && answers[:bathrooms] isa Float64
+        @test answers[:room_type] == "Entire home/apt"            # earlier answers are kept
+
+        # 2. exit at the second question: false, the first answer stays, the second is not stored
+        answers = new_answers("Entire home/apt")
+        @test !P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("4\nq\n"), io_out = IOBuffer())
+        @test answers[:accommodates] == 4
+        @test !haskey(answers, :bedrooms)
+
+        # 3. input that ends before all questions are answered: false
+        @test !P.ask_numbers!(new_answers("Entire home/apt"), rules, df, plausibility; io_in = IOBuffer("4\n"), io_out = IOBuffer())
+
+        # 4. a value above the room type's training maximum (6 guests) is refused, then a valid one is accepted
+        answers = new_answers("Entire home/apt")
+        out = IOBuffer()
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("7\n6\n2\n1.5\n"), io_out = out)
+        @test answers[:accommodates] == 6
+        @test occursin("between", String(take!(out)))
+
+        # 5. the limits depend on the room type: a private room allows at most 2 guests
+        answers = new_answers("Private room")
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("3\n2\n1\n1.0\n"), io_out = IOBuffer())
+        @test answers[:accommodates] == 2
+
+        # 6. a plausibility rule uses an earlier answer: with 2 guests, 3 bedrooms are refused
+        answers = new_answers("Entire home/apt")
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("2\n3\n2\n1.5\n"), io_out = IOBuffer())
+        @test answers[:bedrooms] == 2
+
+        # 7. no rules: nothing is asked, true
+        answers = new_answers("Entire home/apt")
+        @test P.ask_numbers!(answers, NamedTuple[], df, plausibility; io_in = IOBuffer(""), io_out = IOBuffer())
+        @test length(answers) == 1
+    end
 end
  
