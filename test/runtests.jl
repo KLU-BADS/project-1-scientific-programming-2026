@@ -1236,6 +1236,22 @@ const P = Project1
 
         # 6. the input table remains the same
         @test df == df_before
+
+        # 7. log_scale = false
+         x = 1:20
+        error_term = 0.1 .* sin.(x)
+        df_2 = DataFrame(accommodates = x, price = exp.(3.0 .+ 0.1 .* x .+ error_term))
+        spec_2 = (target = :price,
+            log_scale = false,
+            log1p_predictors = Symbol[],
+            predictors = [:accommodates])
+        fit_2 = P.regression_city(df_2, spec_2)
+
+        df_before_2 = copy(df_2)
+        result_2 = P.predict_price_range(fit_2, df_2)    
+
+        @test result_2.median ≈ result_2.mean
+        @test df_2 == df_before_2
     
     end 
     # ------------------------------------------------------------------------------------------

@@ -431,15 +431,15 @@ function predict_price_range(fit::NamedTuple, df_new::DataFrame; level::Real = 0
         median = exp.(unconverted_prediction)
         lower = exp.(unconverted_lower)
         upper = exp.(unconverted_upper)
-        mean = median .* fit.smearing 
+        mean = median .* fit.smearing
         # exp of a log prediction is the median; smearing lifts it to the mean
         # the bounds are quantiles, so they need no smearing
     else 
         median = unconverted_prediction
         lower = unconverted_lower
         upper = unconverted_upper
-        mean = unconverted_prediction 
-    end 
+        mean = unconverted_prediction
+    end
 
     # 5. return results
     return (median = median, mean = mean, lower = lower, upper = upper)
