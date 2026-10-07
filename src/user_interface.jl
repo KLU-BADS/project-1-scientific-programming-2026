@@ -15,37 +15,88 @@ function gui()
 end
 
 """
-    ask_choice() -> Int
+    ask_choice(title, options) -> value or nothing
 
-User interface in REPL allowing a user to select a single choice from a menu.
+Show a menu in the terminal and let the user pick one item. An "Exit" item is always
+added as the last item, so callers do not include it themselves.
 
 # Arguments
-- `title::String`:          title of the menu.
-- options::Vector{String}:  menu items.
+- `title::AbstractString`:              question shown above the menu.
+- `options::AbstractVector{<:Pair}`:    menu items as `label => value` pairs,
+                                        e.g. `["Price a new apartment" => :new, "Check my listed apartment" => :listed]`.
 
+# Throws
+- `ArgumentError`   if `options` is empty or a label is not a text.
+- `MethodError`     if `options` is not a list of pairs, e.g. plain texts.
 
-Returns `index` with the users choice or -1 if user cancels input.
+Returns the value of the chosen pair, or `nothing` if the user chooses "Exit",
+presses `q` or presses Ctrl-C. Callers check the result with `isnothing`.
+
+# Examples
+```jldoctest
+julia> Project1.ask_choice("Menu", Pair{String,Symbol}[])
+ERROR: ArgumentError: options must not be empty
+
+julia> Project1.ask_choice("Menu", [1 => :new, 2 => :listed])
+ERROR: ArgumentError: every option must be a pair label => value with a text label
+```
 """
-function ask_choice(title::String, options::Vector{String}; io_in::IO = stdin, io_out::IO = stdout)
-    # Radio Menu
-    RadioMenu(options; pagesize=-1, charset=:unicode, keybindings=Char[])
+function ask_choice(title::AbstractString, options::AbstractVector{<:Pair})
+    # catch empty options vector
+    isempty(options) && throw(ArgumentError("options must not be empty"))
+    # check wrong structure of options vector
+    all(p -> first(p) isa AbstractString, options) || throw(ArgumentError("every option must be a pair label => value with a text label"))
+    # set labels for RadioMenu options (first add exit option to input options)
+    all_options = vcat(options, ["Exit" => nothing])
+    labels = String.(first.(all_options))
+    # get user input from RadioMenu
+    menu = RadioMenu(labels; pagesize = min(15, length(labels)), charset = :unicode, ctrl_c_interrupt = false)
+    user_selection = request(title, menu)
+    # return nothing if user left the menu or selected exit option, otherwise return value
+    return user_selection == -1 ? nothing : last(all_options[user_selection])
 end
 
 """
-    ask_multiple() -> Set{Int}
+    ask_multiple(title, options) -> Vector
 
-User interface in REPL allowing a user to select multiple options from a menu.
+Show a menu in the terminal in which the user can tick several items.
+Enter ticks or unticks an item, `d` finishes, `q` cancels.
 
 # Arguments
-- `title::String`:          Title of the menu.
-- options::AbstractVector:  Menu items.
+- `title::AbstractString`:              question shown above the menu; mention that `d` finishes,
+                                        e.g. "Amenities (Enter = select, d = done)".
+- `options::AbstractVector{<:Pair}`:    menu items as `label => value` pairs,
+                                        e.g. `["Air conditioning" => :has_AC, "TV" => :has_tv]`.
 
+# Throws
+- `ArgumentError`   if `options` is empty or a label is not a text.
+- `MethodError`     if `options` is not a list of pairs, e.g. plain texts.
 
-Returns `indices` Set{Int} with the users choices (empty if user cancels input).
+Returns the values of all ticked items in menu order, e.g. `[:has_AC, :has_tv]`.
+Returns an empty list if nothing was ticked or the user pressed `q`.
+
+# Examples
+```jldoctest
+julia> Project1.ask_multiple("Amenities", Pair{String,Symbol}[])
+ERROR: ArgumentError: options must not be empty
+
+julia> Project1.ask_multiple("Amenities", [1 => :has_AC, 2 => :has_tv])
+ERROR: ArgumentError: every option must be a pair label => value with a text label
+```
 """
-function ask_multiple(title::String, options::AbstractVector; io_in::IO = stdin, io_out::IO = stdout)
-    # Multi-select menu
-    MultiSelectMenu(options; pagesize=-1, selected=Int[], charset=:unicode)
+function ask_multiple(title::AbstractString, options::AbstractVector{<:Pair})
+    # catch empty options vector
+    isempty(options) && throw(ArgumentError("options must not be empty"))
+    # check wrong structure of options vector
+    all(p -> first(p) isa AbstractString, options) || throw(ArgumentError("every option must be a pair label => value with a text label"))
+    # set labels for MultiSelectMenu options (first add exit option to input options)
+    labels = String.(first.(options))
+    # get user input from MultiSelectMenu and sort it
+    menu = MultiSelectMenu(labels; charset = :unicode, ctrl_c_interrupt = false)
+    user_selection = request(title, menu)
+    sorted_user_selection = sort(collect(user_selection))
+    # return all selected menu items
+    return [last(options[i]) for i in sorted_user_selection]
 end
 
 """

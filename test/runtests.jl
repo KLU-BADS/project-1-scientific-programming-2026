@@ -1561,7 +1561,35 @@ const P = Project1
     # ------------------------------------------------------------------------------------------
     # user_interface.jl
     # ------------------------------------------------------------------------------------------
- 
+    @testset "ask_choice" begin
+        # The menu itself needs a real terminal and is tested by hand:
+        # pick an item, pick "Exit", press q, press Ctrl-C (the last three must give nothing).
+
+        # 1. an empty list of options is refused before the menu is shown
+        @test_throws ArgumentError P.ask_choice("Menu", Pair{String,Symbol}[])
+
+        # 2. labels that are not text are refused
+        @test_throws ArgumentError P.ask_choice("Menu", [1 => :new, 2 => :listed])
+
+        # 3. plain texts instead of pairs do not match the signature
+        @test_throws MethodError P.ask_choice("Menu", ["New", "Listed"])
+    end
+
+    @testset "ask_multiple" begin
+        # The menu itself needs a real terminal and is tested by hand:
+        # tick two items and press d, tick nothing and press d, press q
+        # (the last two must give an empty list).
+
+        # 1. an empty list of options is refused before the menu is shown
+        @test_throws ArgumentError P.ask_multiple("Amenities", Pair{String,Symbol}[])
+
+        # 2. labels that are not text are refused
+        @test_throws ArgumentError P.ask_multiple("Amenities", [1 => :has_AC, 2 => :has_tv])
+
+        # 3. plain texts instead of pairs do not match the signature
+        @test_throws MethodError P.ask_multiple("Amenities", ["AC", "TV"])
+    end
+
     @testset "ask_number" begin
         # IOBuffer("4\n") simulates user input of 4 and pressed Enter
         # ("abc\n5\n") represents several consecutive inputs, one after the other.
