@@ -14,23 +14,6 @@ function gui()
 
 end
 
-function enter_apartment_data(group::Symbol, df_training::DataFrame; io_in::IO = stdin, io_out::IO = stdout)
-    # empty dictionary to collect the user responses
-    answers = Dict{Symbol,Any}()
-    # decide which type of rooms to offer based on sufficient observations of this room type in training set
-    counts = combine(groupby(df_training, :room_type), nrow => :n) 
-    kept_room_types = filter(row -> row.n >= CONFIG.min_room_type_count, counts)
-    room_types = sort(kept_room_types.room_type)
-    room_types_user_options = [rt => rt for rt in room_types]
-    answers[:room_type] = ask_choice("Room type", room_types_user_options)
-    isnothing(answers[:room_type]) && return nothing
-    if group == :new
-
-    elseif group == :listed
-
-    end
-end
-
 """
     ask_choice(title, options) -> value or nothing
 
