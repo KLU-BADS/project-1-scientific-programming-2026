@@ -1749,5 +1749,49 @@ const P = Project1
         printed = IOBuffer()
         @test isnothing(P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed))
     end
+
+    @testset "ask_location" begin
+        # tiny training area around a made-up center: latitude 37.96-38.00, longitude 23.71-23.75,
+        # largest distance 2.5 km (the distances are made up, only their maximum is used)
+        df = DataFrame(latitude = [37.96, 38.00, 37.98], longitude = [23.71, 23.75, 23.73],
+                       proximity_city_center = [2.5, 2.5, 0.0])
+        rule = (target = :proximity_city_center, source_columns = (latitude = :latitude, longitude = :longitude), delete = false)
+        center = (latitude = 37.98, longitude = 23.73)
+        no_margin = (coordinate_margin_deg = 0.0, distance_margin_km = 0.0)
+
+        # 1. the city center is returned as entered
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("37.98\n23.73\n"), io_out = IOBuffer()) ==
+              (latitude = 37.98, longitude = 23.73)
+
+        # 2. a training extreme itself is accepted (limits are inclusive); 38.00, 23.73 is 2.22 km away
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.0\n23.73\n"), io_out = IOBuffer()) ==
+              (latitude = 38.0, longitude = 23.73)
+
+        # 3. a latitude outside the training extremes is refused, then a valid one is accepted
+        out = IOBuffer()
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.1\n37.99\n23.73\n"), io_out = out) ==
+              (latitude = 37.99, longitude = 23.73)
+        @test occursin("between", String(take!(out)))
+
+        # 4. the corner 38.00, 23.75 is inside both extremes but 2.83 km away: refused once, then a valid point
+        out = IOBuffer()
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.0\n23.75\n37.99\n23.73\n"), io_out = out) ==
+              (latitude = 37.99, longitude = 23.73)
+        @test occursin("outside the area", String(take!(out)))
+
+        # 5. with a distance margin of 0.5 km (limit 3.0 km) the same corner is accepted
+        @test P.ask_location(df, rule, (coordinate_margin_deg = 0.0, distance_margin_km = 0.5), center;
+                             io_in = IOBuffer("38.0\n23.75\n"), io_out = IOBuffer()) == (latitude = 38.0, longitude = 23.75)
+
+        # 6. a latitude just outside the extremes (38.005) is accepted only with a coordinate margin
+        @test P.ask_location(df, rule, (coordinate_margin_deg = 0.01, distance_margin_km = 0.5), center;
+                             io_in = IOBuffer("38.005\n23.73\n"), io_out = IOBuffer()) == (latitude = 38.005, longitude = 23.73)
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.005\n"), io_out = IOBuffer()))
+
+        # 7. exit at either question, or input that ends, gives nothing
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("q\n"), io_out = IOBuffer()))
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("37.99\nexit\n"), io_out = IOBuffer()))
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer(""), io_out = IOBuffer()))
+    end
 end
  

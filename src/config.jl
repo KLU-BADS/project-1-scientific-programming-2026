@@ -365,6 +365,11 @@ const CONFIG = (
          prompt = "Nights booked in the last 12 months: ", groups = [:listed]),
     ],
 
+    # Configuration for ask_location(): latitude and longitude are limited to the extremes
+    # of the training data, widened by margin (in degrees; 0.005 ≈ 500 m); the distance to the
+    # city center must not exceed the training maximum.
+        location_rule = (coordinate_margin_deg = 0.005, distance_margin_km = 0.5),
+
     # OPTIONAL, only if address lookup is implemented
     geocoding = (url = "https://nominatim.openstreetmap.org/search",
                 user_agent = "KLU-Project1 student project (<team e-mail>)",

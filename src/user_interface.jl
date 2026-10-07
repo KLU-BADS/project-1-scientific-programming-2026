@@ -190,3 +190,62 @@ function ask_yes_no(prompt::AbstractString; io_in::IO = stdin, io_out::IO = stdo
     # true for a yes-value, false for a no-value
     return answer in yes_values
 end
+
+"""
+    ask_location(df_training, distance_rule, location_rule, center; io_in = stdin, io_out = stdout) -> NamedTuple or nothing
+
+Ask the user for the latitude and longitude of the apartment. Only locations inside the area covered by the
+training data are accepted: each coordinate must lie between the training extremes (widened by a small margin),
+and the distance to the city center must not exceed the largest training distance (plus a small margin).
+Asks again until a valid location is entered.
+
+# Arguments
+- `df_training::DataFrame`:     training data with the columns `latitude`, `longitude` and `proximity_city_center`
+                                (so `calculate_distance!` must have run with `delete = false`).
+- `distance_rule::NamedTuple`:  the distance rule from the config, e.g. `CONFIG.distance_rule`.
+- `location_rule::NamedTuple`:  margins from the config, `(coordinate_margin_deg = …, distance_margin_km = …)`.
+- `center::NamedTuple`:         city center as `(latitude = …, longitude = …)`.
+- `io_in::IO`:                  input stream (default `stdin`); pass an `IOBuffer` in tests.
+- `io_out::IO`:                 output stream for the prompts and messages (default `stdout`).
+
+# Throws
+- `ArgumentError`   if `df_training` has no column `latitude`, `longitude` or `proximity_city_center`.
+
+Returns `(latitude = …, longitude = …)`, or `nothing` if the user enters `q`, `quit` or `exit`
+at either question or the input ends.
+
+# Examples
+```jldoctest
+julia> df = DataFrame(latitude = [37.96, 38.00, 37.98], longitude = [23.71, 23.75, 23.73],
+                      proximity_city_center = [2.5, 2.5, 0.0]);
+
+julia> rule = (target = :proximity_city_center, source_columns = (latitude = :latitude, longitude = :longitude), delete = false);
+
+julia> Project1.ask_location(df, rule, (coordinate_margin_deg = 0.0, distance_margin_km = 0.0), (latitude = 37.98, longitude = 23.73);
+                             io_in = IOBuffer("37.99\\n23.73\\n"), io_out = IOBuffer())
+(latitude = 37.99, longitude = 23.73)
+```
+"""
+function ask_location(df_training::DataFrame, distance_rule::NamedTuple, location_rule::NamedTuple, center::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
+    # get min/max values for latitude/longitude input from the training data and expand by a small margin
+    latitude_min, latitude_max = extrema(df_training.latitude) .+ (-location_rule.coordinate_margin_deg, location_rule.coordinate_margin_deg)
+    longitude_min, longitude_max = extrema(df_training.longitude) .+ (-location_rule.coordinate_margin_deg, location_rule.coordinate_margin_deg)
+    # set maximum distance from city center based on the training data plus a small margin
+    distance_max = maximum(df_training.proximity_city_center) + location_rule.distance_margin_km
+    # get user input with min/max the extrema from the training data plus a small margin, if user exits return nothing
+    while true
+        latitude_input = ask_number("Latitude (e.g. 37.968): ", Float64, latitude_min, latitude_max, true; io_in = io_in, io_out = io_out)
+        isnothing(latitude_input) && return nothing
+        longitude_input = ask_number("Longitude (e.g. 23.727): ", Float64, longitude_min, longitude_max, true; io_in = io_in, io_out = io_out)
+        isnothing(longitude_input) && return nothing
+        # calculate distance to city center and verify validity of the input
+        location = DataFrame(latitude = [latitude_input], longitude = [longitude_input])
+        calculate_distance!(location, merge(distance_rule, (target = :d, delete = false)), center)
+        if location.d[1] > distance_max
+            println(io_out, "This location is outside the area our data covers.")
+            continue
+        end
+        # return values
+        return (latitude = latitude_input, longitude = longitude_input)
+    end
+end
