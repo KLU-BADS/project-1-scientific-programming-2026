@@ -1373,8 +1373,12 @@ const P = Project1
 
         # 4. smearing lifts the mean above the median 
         @test all(result.mean .>= result.median)
+        @test result.mean ≈ result.median .* fit.smearing
 
-        # 5. a 95% range covers more apartments, so it is wider than the 80% range
+        # 5. the median is close to the real prices, so exp was applied
+        @test all(abs.(log.(result.median) .- log.(df.price)) .< 0.2)
+        
+        # 6. a 95% range covers more apartments, so it is wider than the 80% range
         result_95 = P.predict_price_range(fit, df; level = 0.95)
         width_80 = result.upper .- result.lower
         width_95 = result_95.upper .- result_95.lower 
