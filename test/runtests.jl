@@ -1322,6 +1322,112 @@ const P = Project1
         @test_throws ArgumentError P.range_bar(60, 140, 100; width = 0)
     end
 
+    @testset "plot_price_distribution" begin
+        # a small made-up table with prices per night
+        df = DataFrame(price = [50.0, 60, 70, 80, 90, 100, 120, 140, 200, 400])
+
+        # 1. happy path: the chart is printed with its title and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_price_distribution(df; io = io)
+        output = String(take!(io))
+        # take! empties the IOBuffer and gives back what was printed into it, String turns it into text
+        @test occursin("Price per night (EUR)", output)
+        @test result === nothing
+        # === checks it is exactly nothing, not just something equal to it
+
+        # 2. edge case: a different number of bars still prints a chart
+        io = IOBuffer()
+        P.plot_price_distribution(df; nbins = 3, io = io)
+        @test occursin("Price per night (EUR)", String(take!(io)))
+
+        # 3. error case: a table without a price column is rejected
+        @test_throws ArgumentError P.plot_price_distribution(DataFrame(x = [1, 2]); io = IOBuffer())
+        # DataFrames throws ArgumentError when df.price does not exist
+    end
+
+    @testset "plot_price_by_room_type" begin
+        # a small made-up table: 3 entire homes, 2 private rooms, 1 shared room
+        df = DataFrame(
+            room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room", "Private room", "Shared room"],
+            price = [120.0, 150, 180, 50, 70, 30],
+        )
+
+        # 1. happy path: every room type with enough listings gets a box, and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_price_by_room_type(df, 2; io = io)
+        output = String(take!(io))
+        @test occursin("Price by room type", output)
+        @test occursin("Entire home/apt", output)
+        @test occursin("Private room", output)
+        @test result === nothing
+
+        # 2. edge case: a room type below min_count does not appear
+        @test !occursin("Shared room", output)
+        # only 1 shared room, but min_count is 2, so it is left out
+
+        # 3. edge case: no room type has enough listings, so a message is printed instead of a chart
+        io = IOBuffer()
+        P.plot_price_by_room_type(df, 10; io = io)
+        @test occursin("No room type has at least 10 listings.", String(take!(io)))
+
+        # 4. error case: a table without a room_type column is rejected
+        @test_throws ArgumentError P.plot_price_by_room_type(DataFrame(price = [100.0]), 1; io = IOBuffer())
+        # groupby throws ArgumentError when the column does not exist
+    end
+
+    @testset "plot_group_importance" begin
+        # a small made-up importance table like the one group_importance gives back
+        importance = DataFrame(group = ["location", "size"], r2_loss = [0.12, 0.08])
+
+        # 1. happy path: every group name appears and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_group_importance(importance; io = io)
+        output = String(take!(io))
+        @test occursin("What drives the price", output)
+        @test occursin("location", output)
+        @test occursin("size", output)
+        @test result === nothing
+
+        # 2. edge case: a group with a negative loss still prints instead of stopping with an error
+        importance_negative = DataFrame(group = ["location", "amenities"], r2_loss = [0.12, -0.01])
+        io = IOBuffer()
+        P.plot_group_importance(importance_negative; io = io)
+        @test occursin("amenities", String(take!(io)))
+        # the -0.01 is drawn as 0, so the chart still has a line for amenities
+
+        # 3. edge case: an empty table prints a message instead of a chart
+        io = IOBuffer()
+        P.plot_group_importance(DataFrame(group = String[], r2_loss = Float64[]); io = io)
+        @test occursin("No groups of predictors to show.", String(take!(io)))
+
+        # 4. error case: a table without the r2_loss column is rejected
+        @test_throws ArgumentError P.plot_group_importance(DataFrame(group = ["location"]); io = IOBuffer())
+        # DataFrames throws ArgumentError when importance.r2_loss does not exist
+    end
+
+    @testset "plot_predicted_vs_actual" begin
+        # made-up prices of four test listings and what a model predicted for them
+        actual = [50.0, 80, 120, 200]
+        predicted = [60.0, 85, 110, 170]
+
+        # 1. happy path: the chart is printed with its title and axis label, and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_predicted_vs_actual(actual, predicted; io = io)
+        output = String(take!(io))
+        @test occursin("Test set", output)
+        @test occursin("actual EUR", output)
+        @test result === nothing
+
+        # 2. edge case: perfect predictions, every dot lies on the diagonal, still prints without error
+        io = IOBuffer()
+        P.plot_predicted_vs_actual(actual, actual; io = io)
+        @test occursin("Test set", String(take!(io)))
+
+        # 3. error case: vectors of different length and empty vectors are rejected
+        @test_throws DimensionMismatch P.plot_predicted_vs_actual([50.0, 80], [60.0]; io = IOBuffer())
+        @test_throws ArgumentError P.plot_predicted_vs_actual(Float64[], Float64[]; io = IOBuffer())
+    end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------
