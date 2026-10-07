@@ -1599,6 +1599,117 @@ const P = Project1
         @test_throws ArgumentError P.plot_predicted_vs_actual(Float64[], Float64[]; io = IOBuffer())
     end
 
+    @testset "visualize_results" begin
+        # a made-up bundle for a listed apartment that is priced above its range
+        listed = (
+            group = :listed,
+            level = 0.8,
+            price = (median = 96.0, mean = 101.0, lower = 66.0, upper = 140.0),
+            nights = 72.0,
+            revenue = (estimate = 7272.0, lower = 4752.0, upper = 10080.0),
+            current_price = 150.0,
+            assessment = (status = :overpriced, difference = 10.0),
+            district = "Koukaki",
+            room_type = "Entire home/apt",
+            tips = DataFrame(amenity = [:has_AC], change = [7.5], change_pct = [7.8]),
+            rating_tips = DataFrame(score = [:review_scores_cleanliness], pct_per_step = [1.3]),
+        )
+        # the same apartment as a new one: no current price, no assessment, no revenue range
+        new = merge(listed, (group = :new, current_price = nothing, assessment = nothing,
+                             revenue = (estimate = 7272.0, lower = nothing, upper = nothing)))
+        # merge copies the bundle and replaces only the fields given in the second NamedTuple
+
+        # 1. happy path: a listed apartment shows its header, the typical price and the range with ▲
+        io = IOBuffer()
+        result = P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("YOUR LISTING · Koukaki, Entire home/apt", output)
+        @test occursin("Typical price for comparable listings   €96", output)
+        @test occursin("Range (8 of 10 comparable)   €66 to €140", output)
+        @test occursin("▲", output)
+        @test result === nothing
+
+        # 2. edge case: a new apartment has another header and no ▲, because it has no current price
+        io = IOBuffer()
+        P.visualize_results(new; io = io)
+        output = String(take!(io))
+        @test occursin("NEW LISTING", output)
+        @test !occursin("▲", output)
+
+        # 3. happy path: a listed apartment shows the assessment and the revenue with its range
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("Your price €150 is above the range by €10", output)
+        @test occursin("possibly overpriced", output)
+        @test occursin("Revenue at €101 × your 72 nights   €7,272", output)
+        @test occursin("range €4,752 to €10,080", output)
+
+        # 4. edge case: a new apartment gets no assessment and only a rough revenue estimate
+        io = IOBuffer()
+        P.visualize_results(new; io = io)
+        output = String(take!(io))
+        @test occursin("Expected revenue (rough estimate)   €7,272", output)
+        @test !occursin("Your price", output)
+
+        # 5. edge case: a price inside the range is in line
+        in_line = merge(listed, (current_price = 100.0, assessment = (status = :in_line, difference = 0.0)))
+        io = IOBuffer()
+        P.visualize_results(in_line; io = io)
+        output = String(take!(io))
+        @test occursin("Your price €100 is inside the range", output)
+        @test occursin("in line with comparable listings", output)
+
+        # 6. error case: an unknown status is rejected instead of printing a wrong message
+        unknown = merge(listed, (assessment = (status = :cheap, difference = 5.0),))
+        @test_throws KeyError P.visualize_results(unknown; io = IOBuffer())
+        # :cheap is not one of the five statuses, so the Dict lookup throws a KeyError
+
+        # 7. happy path: the amenity tip, the rating tip and the footer are printed
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("+ Air conditioning   +€7.50 per night (+7.8%)", output)
+        @test occursin("Listings rated 0.1 higher for cleanliness charge about 1.3% more.", output)
+        @test occursin("Based on comparable listings, not a guarantee.", output)
+
+        # 8. edge case: an empty tips table prints the sentence instead of tips
+        no_tips = merge(listed, (tips = DataFrame(amenity = Symbol[], change = Float64[], change_pct = Float64[]),))
+        io = IOBuffer()
+        P.visualize_results(no_tips; io = io)
+        @test occursin("No missing amenity has a clear price effect.", String(take!(io)))
+
+        # 9. edge case: with five tips only the first three are shown
+        five_tips = merge(listed, (tips = DataFrame(amenity = [:has_AC, :has_tv, :has_kettle, :has_washer, :has_dishwasher],
+                                                    change = [7.5, 5.0, 3.0, 2.0, 1.0],
+                                                    change_pct = [7.8, 5.2, 3.1, 2.1, 1.0]),))
+        io = IOBuffer()
+        P.visualize_results(five_tips; io = io)
+        @test count("per night", String(take!(io))) == 3
+        # count gives how often the text appears, every tip line contains "per night" once
+
+        # 10. error case: an amenity without a label in CONFIG is rejected
+        unknown_amenity = merge(listed, (tips = DataFrame(amenity = [:has_jacuzzi], change = [9.0], change_pct = [9.0]),))
+        @test_throws KeyError P.visualize_results(unknown_amenity; io = IOBuffer())
+
+        # 11. edge case: the three statuses not covered above print where the price lies and their own message
+        statuses = [
+            # status                current price   where it lies       start of the message
+            (:underpriced,          50.0,           "below the range",  "probably underpriced"),
+            (:not_price_problem,    50.0,           "below the range",  "cheap but few bookings"),
+            (:unexplained_premium,  150.0,          "above the range",  "guests pay more than the model expects"),
+        ]
+        @testset "status $status" for (status, price, position, message) in statuses
+            bundle = merge(listed, (current_price = price, assessment = (status = status, difference = 16.0)))
+            io = IOBuffer()
+            P.visualize_results(bundle; io = io)
+            output = String(take!(io))
+            @test occursin("Your price $(P.format_eur(price)) is $position", output)
+            @test occursin(message, output)
+        end
+        # @testset ... for runs the same two tests once for every row of the list, each as its own small test set
+    end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------

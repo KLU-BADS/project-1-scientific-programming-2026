@@ -234,3 +234,100 @@ function plot_predicted_vs_actual(actual::AbstractVector, predicted::AbstractVec
 
     return nothing
 end
+
+"""
+    visualize_results(result; io = stdout)
+
+Print the result screen for one apartment: the typical price and its range, for a listed apartment
+the assessment of its current price, the expected revenue, and tips to raise the price.
+
+# Arguments
+- `result::NamedTuple`: The bundle from `run_prediction_pipeline` with the fields `group` (`:new` or `:listed`),
+                        `level`, `price` (`median`, `mean`, `lower`, `upper`), `nights`, `revenue`
+                        (`estimate`, `lower`, `upper`), `current_price`, `assessment` (`status`, `difference`),
+                        `district`, `room_type`, `tips` and `rating_tips`.
+- `io::IO`:             Where the screen is printed (default `stdout`, the terminal).
+
+Returns `nothing`, the screen is only printed.
+"""
+function visualize_results(result::NamedTuple; io::IO = stdout)
+    # 1. header: a listed or a new apartment, then where it is and what kind of place it is
+    title = result.group == :listed ? "YOUR LISTING" : "NEW LISTING"
+    # cond ? a : b = a if the condition is true, otherwise b (a short if-else in one line)
+    printstyled(io, "$title · $(result.district), $(result.room_type)\n"; bold = true)
+    println(io, "─"^50)
+    # "─"^50 repeats the line character 50 times, a string to the power n means n copies
+
+    # 2. the typical price: the median of comparable listings
+    println(io, "Typical price for comparable listings   ", format_eur(result.price.median))
+
+    # 3. the range: level 0.8 means 8 of 10 comparable listings lie inside it
+    shown = round(Int, result.level * 10)
+    println(io, "Range ($shown of 10 comparable)   ", format_eur(result.price.lower), " to ", format_eur(result.price.upper))
+    println(io, "  ", range_bar(result.price.lower, result.price.upper, result.price.median; current = result.current_price))
+    # for a new apartment current_price is nothing, so range_bar draws no ▲
+    println(io)
+
+    # 4. listed apartments only: how the current price compares with the range, with a coloured message
+    if result.group == :listed && !isnothing(result.assessment)
+        status = result.assessment.status
+        current = format_eur(result.current_price)
+        difference = format_eur(result.assessment.difference)
+        if status in (:underpriced, :not_price_problem)
+            println(io, "Your price $current is below the range by $difference")
+        elseif status in (:overpriced, :unexplained_premium)
+            println(io, "Your price $current is above the range by $difference")
+        else
+            println(io, "Your price $current is inside the range")
+        end
+        # the status says where the price is: two statuses below the range, two above, :in_line inside
+
+        messages = Dict(
+            :underpriced         => ("probably underpriced; demand is strong at your price", :green),
+            :in_line             => ("in line with comparable listings", :green),
+            :not_price_problem   => ("cheap but few bookings; check photos, description, visibility", :yellow),
+            :overpriced          => ("possibly overpriced", :red),
+            :unexplained_premium => ("guests pay more than the model expects; no action", :default),
+        )
+        message, color = messages[status]
+        printstyled(io, message, "\n"; color = color)
+        # every status has one sentence and one colour; an unknown status stops with a KeyError
+        println(io)
+    end
+
+    # 5. revenue: the mean price times the booked nights per year
+    if result.group == :listed
+        println(io, "Revenue at ", format_eur(result.price.mean), " × your ", round(Int, result.nights), " nights   ", format_eur(result.revenue.estimate))
+        println(io, "  range ", format_eur(result.revenue.lower), " to ", format_eur(result.revenue.upper))
+    else
+        println(io, "Expected revenue (rough estimate)   ", format_eur(result.revenue.estimate))
+    end
+    # a new apartment has no booking history, so its nights are only a guess and no range is shown
+    println(io)
+
+    # 6. tips: up to 3 missing amenities that would raise the price, then the rating tips
+    println(io, "Ways to raise your price")
+    if nrow(result.tips) == 0
+        println(io, "  No missing amenity has a clear price effect.")
+    else
+        for row in eachrow(first(result.tips, 3))
+            label = CONFIG.amenity_labels[row.amenity]
+            println(io, "  + ", label, "   +", format_eur(row.change; digits = 2), " per night (+", round(row.change_pct; digits = 1), "%)")
+        end
+    end
+    # first(table, 3) keeps the first 3 rows; the tips are already sorted from the largest effect down
+    # CONFIG.amenity_labels turns the column name :has_AC into the readable "Air conditioning"
+
+    step = CONFIG.rating_tips.step
+    for row in eachrow(result.rating_tips)
+        name = replace(String(row.score), "review_scores_" => "")
+        println(io, "  Listings rated $step higher for $name charge about $(round(row.pct_per_step; digits = 1))% more.")
+    end
+    # replace cuts the prefix, so :review_scores_cleanliness becomes "cleanliness"
+    println(io)
+
+    # 7. footer: the numbers describe comparable listings, they do not promise anything
+    println(io, "Based on comparable listings, not a guarantee.")
+
+    return nothing
+end
