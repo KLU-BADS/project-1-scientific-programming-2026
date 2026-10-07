@@ -1137,11 +1137,12 @@ julia> Project1.geet_amenity_columns(rules)
 ```
 """
 function get_amenity_columns(dummy_rules::AbstractVector{<:NamedTuple})
-    col = Symbol[]
+    columns = Symbol[]
     # get a vector of all the amenities based on the dummy rules config
     for rule in dummy_rules
         if rule.source == :amenities
-            push!(col, rule.target)
+            push!(columns, rule.target)
         end
     end
     return columns
+end
