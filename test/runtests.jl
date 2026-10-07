@@ -669,6 +669,59 @@ const P = Project1
         # the limit cannot be calculated from an empty cell either
     end
 
+    @testset "input_bounds" begin
+        # 1. made-up training data with two room types
+        df = DataFrame(
+            room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room"],
+            accommodates = [2, 4, 6, 10],
+            bedrooms = [1, 2, 3, 5],
+            beds = [2, 3, 5, 6],
+            bathrooms = [1.0, 1.5, 6.0, 4.0],
+        )
+        entire = Dict(:room_type => "Entire home/apt")
+        no_rules = NamedTuple[]
+        # a rule needs only column, value_type, min and max here; min or max = nothing means "take it from the data"
+
+        # 2. fixed limits are used as they are, the data is not needed
+        rule_fixed = (column = :accommodates, value_type = Int, min = 1, max = 8)
+        @test P.input_bounds(rule_fixed, entire, df, no_rules) == (1, 8)
+
+        # 3. nothing = the smallest and largest value of the chosen room type
+        rule_bedrooms = (column = :bedrooms, value_type = Int, min = nothing, max = nothing)
+        @test P.input_bounds(rule_bedrooms, entire, df, no_rules) == (1, 3)
+        @test P.input_bounds(rule_bedrooms, Dict(:room_type => "Private room"), df, no_rules) == (5, 5)
+
+        # 4. a fixed minimum and a maximum from the data can be mixed
+        rule_guests = (column = :accommodates, value_type = Int, min = 1, max = nothing)
+        @test P.input_bounds(rule_guests, entire, df, no_rules) == (1, 6)
+
+        # 5. a plausibility rule limits the maximum by an earlier answer
+        # only the rules whose column is the question count: the bathrooms question ignores the bedrooms rule
+        rules = [(column = :bathrooms, max_of = :bedrooms,     factor = 1.0, offset = 2.0),
+                 (column = :bedrooms,  max_of = :accommodates, factor = 1.0, offset = 0.0),
+                 (column = :beds,      max_of = :accommodates, factor = 1.5, offset = 0.0)]
+        rule_bathrooms = (column = :bathrooms, value_type = Float64, min = 0.5, max = nothing)
+        # 1 bedroom: at most 1 + 2 = 3 bathrooms, although the data goes up to 6.0
+        @test P.input_bounds(rule_bathrooms, Dict(:room_type => "Entire home/apt", :bedrooms => 1), df, rules) == (0.5, 3.0)
+        # 2 guests: at most 2 bedrooms, although the data goes up to 3
+        @test P.input_bounds(rule_bedrooms, Dict(:room_type => "Entire home/apt", :accommodates => 2), df, rules) == (1, 2)
+
+        # 6. a limit above the data maximum does not raise the maximum
+        @test P.input_bounds(rule_bathrooms, Dict(:room_type => "Entire home/apt", :bedrooms => 10), df, rules) == (0.5, 6.0)
+
+        # 7. whole-number questions are rounded inwards: the minimum up, the maximum down
+        # 3 guests: 1.5 * 3 = 4.5 beds at most, which becomes 4; the minimum 1.2 becomes 2
+        rule_beds = (column = :beds, value_type = Int, min = 1.2, max = nothing)
+        lo, hi = P.input_bounds(rule_beds, Dict(:room_type => "Entire home/apt", :accommodates => 3), df, rules)
+        @test (lo, hi) == (2, 4)
+        @test lo isa Int
+        @test hi isa Int
+
+        # 8. error cases: the earlier answer is missing, or the room type does not exist
+        @test_throws ArgumentError P.input_bounds(rule_bathrooms, entire, df, rules)
+        @test_throws ArgumentError P.input_bounds(rule_bedrooms, Dict(:room_type => "Hotel room"), df, no_rules)
+    end
+
     @testset "compute_caps" begin
         # 1. the cap rule, written here so the test does not depend on CONFIG
         # the quantile is 0.75 instead of 0.995 so that the expected caps are easy to count by hand; the code is the same
@@ -707,6 +760,54 @@ const P = Project1
 
         # 6. computing the caps does not change the table
         @test isequal(df, df_before)
+    end
+
+    @testset "cap_values!" begin
+        # 1. the cap rule and the caps, written here so the test does not depend on CONFIG or compute_caps
+        # the quantile of the rule is not used by cap_values!, only the columns and the group_by column
+        rule = (columns = [:accommodates, :bathrooms], group_by = :room_type, quantile = 0.75)
+        caps = Dict{Tuple{String,Symbol},Float64}(
+            ("Entire home/apt", :accommodates) => 8.0,
+            ("Entire home/apt", :bathrooms) => 2.0,
+            ("Private room", :accommodates) => 3.0,
+            ("Private room", :bathrooms) => 1.0,
+        )
+
+        # 2. a table with two room types whose rows are mixed
+        # each room type has values below the cap, exactly on the cap and above the cap
+        df = DataFrame(
+            room_type = [
+                "Entire home/apt", "Private room", "Entire home/apt", "Private room",
+                "Entire home/apt", "Private room", "Entire home/apt", "Private room",
+                "Entire home/apt", "Private room",
+            ],
+            accommodates = [2, 1, 4, 2, 6, 2, 8, 3, 100, 50],
+            bathrooms = [1.0, 1.0, 1.5, 1.0, 2.0, 1.0, 2.5, 1.5, 9.0, 5.0],
+        )
+        room_types_before = copy(df.room_type)
+
+        result = P.cap_values!(df, caps, rule)
+
+        # 3. the function returns the modified table itself, no row is removed
+        @test result === df
+        @test nrow(df) == 10
+
+        # 4. values above the cap become the cap, values below or exactly on it stay
+        # entire homes: 8 guests is exactly on the cap and stays, 100 becomes 8
+        # private rooms: 3 guests is exactly on the cap and stays, 50 becomes 3
+        @test df.accommodates == [2, 1, 4, 2, 6, 2, 8, 3, 8, 3]
+        @test df.bathrooms == [1.0, 1.0, 1.5, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0]
+
+        # 5. an Int column stays an Int column
+        @test eltype(df.accommodates) == Int
+
+        # 6. the room types are not changed
+        @test df.room_type == room_types_before
+
+        # 7. error case: a room type that has no cap
+        df = DataFrame(room_type = ["Hotel room"], accommodates = [2], bathrooms = [1.0])
+        @test_throws ArgumentError P.cap_values!(df, caps, rule)
+        # a room type that was not in the training data cannot be capped
     end
 
     @testset "format_dummies!" begin
@@ -1167,7 +1268,53 @@ const P = Project1
         @test P.coefnames(fit_other.model) == ["(Intercept)", "cat: B", "cat: C"]
     end
 
-     @testset "get_r2" begin
+    @testset "get_fit" begin
+        # 1. two made-up fits, only the name inside the spec matters for get_fit
+        fit_a = (spec = (name = :a,), model = "model a")
+        fit_b = (spec = (name = :b,), model = "model b")
+        fits = [fit_a, fit_b]
+
+        # 2. a fit is found by its name, not by its position
+        @test P.get_fit(fits, :a) === fit_a
+        @test P.get_fit(fits, :b) === fit_b
+        @test P.get_fit(reverse(fits), :b) === fit_b
+        # the order of the list does not matter
+
+        # 3. error case: a name that does not exist
+        @test_throws ArgumentError P.get_fit(fits, :c)
+
+        # 4. the error message lists the available names
+        @test_throws "available names: :a, :b" P.get_fit(fits, :c)
+    end
+
+    @testset "group_importance" begin
+        # 1. made-up data: log(price) depends on x only, kind is a category without any effect
+        # x and kind are balanced (every combination appears twice), so kind cannot explain any part of the price
+        df = DataFrame(x = Float64.(repeat(1:6, 10)), kind = repeat(["a", "b", "c", "d", "e"], 12))
+        df.price = exp.(1.0 .+ 0.5 .* df.x)
+        spec = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x, :kind])
+        groups = ["Noise" => [:kind], "Signal" => [:x]]
+
+        # 2. one row per group, with the columns group and r2_loss
+        result = P.group_importance(df, df, spec, groups)
+        @test names(result) == ["group", "r2_loss"]
+        @test nrow(result) == 2
+
+        # 3. the group that drives the price loses almost all R², the useless group loses nothing
+        # the largest loss comes first, so Signal is listed first although it was given second
+        @test result.group == ["Signal", "Noise"]
+        @test result.r2_loss[1] > 0.9
+        @test abs(result.r2_loss[2]) < 1e-6
+
+        # 4. reference levels are passed on to the fits and do not change the loss
+        with_reference = P.group_importance(df, df, spec, groups; reference_levels = Dict(:kind => "b"))
+        @test with_reference.r2_loss ≈ result.r2_loss
+
+        # 5. the spec that was passed in is not changed by the refits
+        @test spec.predictors == [:x, :kind]
+    end
+
+    @testset "get_r2" begin
         
         # real values vector
         y1 = [1, 2, 3, 4]
@@ -1203,7 +1350,60 @@ const P = Project1
         # test if function throws error for missing values
         y_hat = [4, missing, 2, 1]
         @test_throws MissingException P.get_r2(y1,y_hat) 
-     end
+    end
+
+    @testset "assess_listing" begin 
+        lower = 66.0
+        upper = 140.0
+        reference = 0.6
+        cases = [
+            # status                current   occupancy   expected difference
+            (:underpriced,          50.0,     0.8,        16.0),     # below the range, well booked
+            (:not_price_problem,    50.0,     0.3,        16.0),     # below the range, rarely booked
+            (:in_line,              100.0,    0.8,        0.0),      # inside the range
+            (:overpriced,           160.0,    0.3,        20.0),     # above the range, rarely booked
+            (:unexplained_premium,  160.0,    0.8,        20.0),     # above the range, well booked
+            (:in_line,              66.0,     0.3,        0.0),      # exactly on the lower bound counts as inside
+            (:in_line,              140.0,    0.8,        0.0),      # exactly on the upper bound counts as inside
+        ]
+
+        for (expected_status, current, occupancy, expected_difference) in cases
+            result = P.assess_listing(current, lower, upper, occupancy, reference)
+            @test result.status == expected_status
+            @test result.difference == expected_difference
+        end 
+
+    end
+    @testset "occupancy_reference" begin
+        # 1. made-up listings: district A has 20 entire homes, B has 3, and A has 2 private rooms
+        df = DataFrame(
+            district = vcat(fill("A", 20), fill("B", 3), fill("A", 2)),
+            room_type = vcat(fill("Entire home/apt", 23), fill("Private room", 2)),
+            occupancy_rate = vcat(collect(1:20) ./ 100, [0.5, 0.6, 0.7], [0.3, 0.4]),
+        )
+        rule = (group_by = [:district, :room_type], min_count = 20, fallback = :room_type, high_quantile = 0.5)
+
+        # 2. a group with exactly min_count listings uses its own median
+        # the median of 0.01 ... 0.20 is (0.10 + 0.11) / 2
+        @test P.occupancy_reference(df, "A", "Entire home/apt", rule) ≈ 0.105
+
+        # 3. a group with fewer listings falls back to the median of the room type (all 23 entire homes)
+        @test P.occupancy_reference(df, "B", "Entire home/apt", rule) ≈ 0.12
+
+        # 4. a district that does not exist falls back in the same way
+        @test P.occupancy_reference(df, "Z", "Entire home/apt", rule) ≈ 0.12
+
+        # 5. q chooses the quantile: 0.75 gives a higher value than the median
+        high = P.occupancy_reference(df, "A", "Entire home/apt", rule; q = 0.75)
+        @test high ≈ 0.1525
+        @test high > P.occupancy_reference(df, "A", "Entire home/apt", rule)
+
+        # 6. the result is a plain Float64
+        @test P.occupancy_reference(df, "A", "Entire home/apt", rule) isa Float64
+
+        # 7. error case: no listings with this room type at all
+        @test_throws ArgumentError P.occupancy_reference(df, "A", "Hotel room", rule)
+    end
 
     @testset "predict_price_range" begin 
         # 1. test setup 
@@ -1321,6 +1521,112 @@ const P = Project1
         # 10. error case: an upside down range and a bar without places are rejected
         @test_throws ArgumentError P.range_bar(140, 60, 100)
         @test_throws ArgumentError P.range_bar(60, 140, 100; width = 0)
+    end
+
+    @testset "plot_price_distribution" begin
+        # a small made-up table with prices per night
+        df = DataFrame(price = [50.0, 60, 70, 80, 90, 100, 120, 140, 200, 400])
+
+        # 1. happy path: the chart is printed with its title and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_price_distribution(df; io = io)
+        output = String(take!(io))
+        # take! empties the IOBuffer and gives back what was printed into it, String turns it into text
+        @test occursin("Price per night (EUR)", output)
+        @test result === nothing
+        # === checks it is exactly nothing, not just something equal to it
+
+        # 2. edge case: a different number of bars still prints a chart
+        io = IOBuffer()
+        P.plot_price_distribution(df; nbins = 3, io = io)
+        @test occursin("Price per night (EUR)", String(take!(io)))
+
+        # 3. error case: a table without a price column is rejected
+        @test_throws ArgumentError P.plot_price_distribution(DataFrame(x = [1, 2]); io = IOBuffer())
+        # DataFrames throws ArgumentError when df.price does not exist
+    end
+
+    @testset "plot_price_by_room_type" begin
+        # a small made-up table: 3 entire homes, 2 private rooms, 1 shared room
+        df = DataFrame(
+            room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room", "Private room", "Shared room"],
+            price = [120.0, 150, 180, 50, 70, 30],
+        )
+
+        # 1. happy path: every room type with enough listings gets a box, and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_price_by_room_type(df, 2; io = io)
+        output = String(take!(io))
+        @test occursin("Price by room type", output)
+        @test occursin("Entire home/apt", output)
+        @test occursin("Private room", output)
+        @test result === nothing
+
+        # 2. edge case: a room type below min_count does not appear
+        @test !occursin("Shared room", output)
+        # only 1 shared room, but min_count is 2, so it is left out
+
+        # 3. edge case: no room type has enough listings, so a message is printed instead of a chart
+        io = IOBuffer()
+        P.plot_price_by_room_type(df, 10; io = io)
+        @test occursin("No room type has at least 10 listings.", String(take!(io)))
+
+        # 4. error case: a table without a room_type column is rejected
+        @test_throws ArgumentError P.plot_price_by_room_type(DataFrame(price = [100.0]), 1; io = IOBuffer())
+        # groupby throws ArgumentError when the column does not exist
+    end
+
+    @testset "plot_group_importance" begin
+        # a small made-up importance table like the one group_importance gives back
+        importance = DataFrame(group = ["location", "size"], r2_loss = [0.12, 0.08])
+
+        # 1. happy path: every group name appears and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_group_importance(importance; io = io)
+        output = String(take!(io))
+        @test occursin("What drives the price", output)
+        @test occursin("location", output)
+        @test occursin("size", output)
+        @test result === nothing
+
+        # 2. edge case: a group with a negative loss still prints instead of stopping with an error
+        importance_negative = DataFrame(group = ["location", "amenities"], r2_loss = [0.12, -0.01])
+        io = IOBuffer()
+        P.plot_group_importance(importance_negative; io = io)
+        @test occursin("amenities", String(take!(io)))
+        # the -0.01 is drawn as 0, so the chart still has a line for amenities
+
+        # 3. edge case: an empty table prints a message instead of a chart
+        io = IOBuffer()
+        P.plot_group_importance(DataFrame(group = String[], r2_loss = Float64[]); io = io)
+        @test occursin("No groups of predictors to show.", String(take!(io)))
+
+        # 4. error case: a table without the r2_loss column is rejected
+        @test_throws ArgumentError P.plot_group_importance(DataFrame(group = ["location"]); io = IOBuffer())
+        # DataFrames throws ArgumentError when importance.r2_loss does not exist
+    end
+
+    @testset "plot_predicted_vs_actual" begin
+        # made-up prices of four test listings and what a model predicted for them
+        actual = [50.0, 80, 120, 200]
+        predicted = [60.0, 85, 110, 170]
+
+        # 1. happy path: the chart is printed with its title and axis label, and the function gives back nothing
+        io = IOBuffer()
+        result = P.plot_predicted_vs_actual(actual, predicted; io = io)
+        output = String(take!(io))
+        @test occursin("Test set", output)
+        @test occursin("actual EUR", output)
+        @test result === nothing
+
+        # 2. edge case: perfect predictions, every dot lies on the diagonal, still prints without error
+        io = IOBuffer()
+        P.plot_predicted_vs_actual(actual, actual; io = io)
+        @test occursin("Test set", String(take!(io)))
+
+        # 3. error case: vectors of different length and empty vectors are rejected
+        @test_throws DimensionMismatch P.plot_predicted_vs_actual([50.0, 80], [60.0]; io = IOBuffer())
+        @test_throws ArgumentError P.plot_predicted_vs_actual(Float64[], Float64[]; io = IOBuffer())
     end
 
     # ------------------------------------------------------------------------------------------
@@ -1453,5 +1759,298 @@ const P = Project1
         @test_broken false
     end
  
+    # ------------------------------------------------------------------------------------------
+    # user_interface.jl
+    # ------------------------------------------------------------------------------------------
+    @testset "ask_choice" begin
+        # The menu itself needs a real terminal and is tested by hand:
+        # pick an item, pick "Exit", press q, press Ctrl-C (the last three must give nothing).
+
+        # 1. an empty list of options is refused before the menu is shown
+        @test_throws ArgumentError P.ask_choice("Menu", Pair{String,Symbol}[])
+
+        # 2. labels that are not text are refused
+        @test_throws ArgumentError P.ask_choice("Menu", [1 => :new, 2 => :listed])
+
+        # 3. plain texts instead of pairs do not match the signature
+        @test_throws MethodError P.ask_choice("Menu", ["New", "Listed"])
+    end
+
+    @testset "ask_multiple" begin
+        # The menu itself needs a real terminal and is tested by hand:
+        # tick two items and press d, tick nothing and press d, press q
+        # (the last two must give an empty list).
+
+        # 1. an empty list of options is refused before the menu is shown
+        @test_throws ArgumentError P.ask_multiple("Amenities", Pair{String,Symbol}[])
+
+        # 2. labels that are not text are refused
+        @test_throws ArgumentError P.ask_multiple("Amenities", [1 => :has_AC, 2 => :has_tv])
+
+        # 3. plain texts instead of pairs do not match the signature
+        @test_throws MethodError P.ask_multiple("Amenities", ["AC", "TV"])
+    end
+
+    @testset "ask_number" begin
+        # IOBuffer("4\n") simulates user input of 4 and pressed Enter
+        # ("abc\n5\n") represents several consecutive inputs, one after the other.
+        # Empty IOBuffer() catches everything the function prints,
+        # to check the messages with String(take!(...)).
+
+        # 1. A valid whole number is returned as an Int
+        user_input = IOBuffer("4\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 4
+        @test result isa Int
+
+        # 2. A valid decimal number is returned as a Float64
+        user_input = IOBuffer("2.5\n")
+        printed = IOBuffer()
+        result = P.ask_number("Rating: ", Float64, 0, 10; io_in = user_input, io_out = printed)
+        @test result == 2.5
+        @test result isa Float64
+
+        # 3. Spaces around the number are ignored
+        user_input = IOBuffer("  7  \n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 7
+
+        # 4. Text instead of a number: the function asks again
+        #    First answer "abc" is invalid, second answer "5" is valid
+        user_input = IOBuffer("abc\n5\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 5
+        @test occursin("whole number", String(take!(printed)))     # the error message was shown
+
+        # 5. A decimal number is not accepted when a whole number (Int) is asked for
+        user_input = IOBuffer("3.5\n4\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 4
+
+        # 6. A number outside the range: the function asks again
+        #    50 is too high, 0 is too low, 5 is fine
+        user_input = IOBuffer("50\n0\n5\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 5
+        @test occursin("between", String(take!(printed)))          # the range message was shown
+
+        # 7. Boundary values: by default (inclusive_interval = false) 16 itself is NOT allowed ...
+        user_input = IOBuffer("16\n8\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test result == 8                                          # 16 was rejected, 8 accepted
+
+        # ... but with inclusive_interval = true, 16 IS allowed
+        user_input = IOBuffer("16\n")
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16, true; io_in = user_input, io_out = printed)
+        @test result == 16
+
+        # 8. Without min and max, every number is allowed
+        user_input = IOBuffer("-1000\n")
+        printed = IOBuffer()
+        result = P.ask_number("Any number: ", Int; io_in = user_input, io_out = printed)
+        @test result == -1000
+
+        # 9. The user cancels with q, quit or exit (upper or lower case): the result is nothing
+        for cancel_word in ["q", "quit", "EXIT"]
+            user_input = IOBuffer(cancel_word * "\n")
+            printed = IOBuffer()
+            result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+            @test isnothing(result)
+        end
+
+        # 10. The input ends before a valid number was given: the result is nothing
+        user_input = IOBuffer("abc\n")                             # only one invalid answer, then nothing more
+        printed = IOBuffer()
+        result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
+        @test isnothing(result)
+    end
+
+    @testset "ask_yes_no" begin
+        # How these tests work:
+        # IOBuffer("y\n") simulates user typed y and pressed Enter.
+        # ("maybe\nn\n") simulates several consecutive answers.
+        # Empty IOBuffer() catches everything the function prints,
+        # so to compare with expected message using String(take!(...)).
+
+        # 1. "y" means yes: the result is true (a Bool)
+        user_input = IOBuffer("y\n")
+        printed = IOBuffer()
+        result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test result == true
+        @test result isa Bool
+
+        # 2. "n" means no: the result is false
+        user_input = IOBuffer("n\n")
+        printed = IOBuffer()
+        result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test result == false
+
+        # 3. The prompt is shown to the user
+        user_input = IOBuffer("y\n")
+        printed = IOBuffer()
+        P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test startswith(String(take!(printed)), "Continue? ")
+
+        # 4. All accepted yes-words give true ...
+        for yes_word in ["y", "yes", "t", "true"]
+            user_input = IOBuffer(yes_word * "\n")
+            printed = IOBuffer()
+            @test P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed) == true
+        end
+
+        # ... and all accepted no-words give false
+        for no_word in ["n", "no", "f", "false"]
+            user_input = IOBuffer(no_word * "\n")
+            printed = IOBuffer()
+            @test P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed) == false
+        end
+
+        # 5. Upper case and spaces around the answer are ignored
+        user_input = IOBuffer("  YES  \n")
+        printed = IOBuffer()
+        result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test result == true
+
+        # 6. An invalid answer: the function shows a hint and asks again
+        #    First answer "maybe" is invalid, second answer "n" is valid
+        user_input = IOBuffer("maybe\nn\n")
+        printed = IOBuffer()
+        result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test result == false
+        @test occursin("Please answer y or n.", String(take!(printed)))
+
+        # 7. Just pressing Enter (empty answer) is not accepted: the function asks again
+        user_input = IOBuffer("\ny\n")
+        printed = IOBuffer()
+        result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+        @test result == true
+
+        # 8. The user cancels with q, quit or exit (upper or lower case): the result is nothing
+        for cancel_word in ["q", "quit", "EXIT"]
+            user_input = IOBuffer(cancel_word * "\n")
+            printed = IOBuffer()
+            result = P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed)
+            @test isnothing(result)
+        end
+
+        # 9. The input ends before a valid answer was given: the result is nothing
+        #    (instead of waiting forever)
+        user_input = IOBuffer("")                       # no input at all
+        printed = IOBuffer()
+        @test isnothing(P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed))
+
+        user_input = IOBuffer("maybe\n")                # only one invalid answer, then nothing more
+        printed = IOBuffer()
+        @test isnothing(P.ask_yes_no("Continue? ", io_in = user_input, io_out = printed))
+    end
+
+    @testset "ask_location" begin
+        # tiny training area around a made-up center: latitude 37.96-38.00, longitude 23.71-23.75,
+        # largest distance 2.5 km (the distances are made up, only their maximum is used)
+        df = DataFrame(latitude = [37.96, 38.00, 37.98], longitude = [23.71, 23.75, 23.73],
+                       proximity_city_center = [2.5, 2.5, 0.0])
+        rule = (target = :proximity_city_center, source_columns = (latitude = :latitude, longitude = :longitude), delete = false)
+        center = (latitude = 37.98, longitude = 23.73)
+        no_margin = (coordinate_margin_deg = 0.0, distance_margin_km = 0.0)
+
+        # 1. the city center is returned as entered
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("37.98\n23.73\n"), io_out = IOBuffer()) ==
+              (latitude = 37.98, longitude = 23.73)
+
+        # 2. a training extreme itself is accepted (limits are inclusive); 38.00, 23.73 is 2.22 km away
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.0\n23.73\n"), io_out = IOBuffer()) ==
+              (latitude = 38.0, longitude = 23.73)
+
+        # 3. a latitude outside the training extremes is refused, then a valid one is accepted
+        out = IOBuffer()
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.1\n37.99\n23.73\n"), io_out = out) ==
+              (latitude = 37.99, longitude = 23.73)
+        @test occursin("between", String(take!(out)))
+
+        # 4. the corner 38.00, 23.75 is inside both extremes but 2.83 km away: refused once, then a valid point
+        out = IOBuffer()
+        @test P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.0\n23.75\n37.99\n23.73\n"), io_out = out) ==
+              (latitude = 37.99, longitude = 23.73)
+        @test occursin("outside the area", String(take!(out)))
+
+        # 5. with a distance margin of 0.5 km (limit 3.0 km) the same corner is accepted
+        @test P.ask_location(df, rule, (coordinate_margin_deg = 0.0, distance_margin_km = 0.5), center;
+                             io_in = IOBuffer("38.0\n23.75\n"), io_out = IOBuffer()) == (latitude = 38.0, longitude = 23.75)
+
+        # 6. a latitude just outside the extremes (38.005) is accepted only with a coordinate margin
+        @test P.ask_location(df, rule, (coordinate_margin_deg = 0.01, distance_margin_km = 0.5), center;
+                             io_in = IOBuffer("38.005\n23.73\n"), io_out = IOBuffer()) == (latitude = 38.005, longitude = 23.73)
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("38.005\n"), io_out = IOBuffer()))
+
+        # 7. exit at either question, or input that ends, gives nothing
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("q\n"), io_out = IOBuffer()))
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer("37.99\nexit\n"), io_out = IOBuffer()))
+        @test isnothing(P.ask_location(df, rule, no_margin, center; io_in = IOBuffer(""), io_out = IOBuffer()))
+    end
+
+    @testset "ask_numbers!" begin
+        # tiny training data with two room types; only the limits are taken from it
+        df = DataFrame(room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room", "Private room"],
+                       accommodates = [2, 4, 6, 1, 2],
+                       bedrooms     = [1, 2, 3, 1, 1],
+                       bathrooms    = [1.0, 1.5, 2.0, 1.0, 1.0])
+        # own rules, so the tests do not depend on CONFIG
+        rules = [
+            (column = :accommodates, value_type = Int,     min = 1,       max = nothing, prompt = "Guests: ",    groups = [:new, :listed]),
+            (column = :bedrooms,     value_type = Int,     min = nothing, max = nothing, prompt = "Bedrooms: ",  groups = [:new, :listed]),
+            (column = :bathrooms,    value_type = Float64, min = 0.5,     max = nothing, prompt = "Bathrooms: ", groups = [:new, :listed]),
+        ]
+        plausibility = [
+            (column = :bedrooms,  max_of = :accommodates, factor = 1.0, offset = 0.0),
+            (column = :bathrooms, max_of = :bedrooms,     factor = 1.0, offset = 2.0),
+        ]
+        new_answers(room_type) = Dict{Symbol,Any}(:room_type => room_type)
+
+        # 1. all questions answered: true, every answer stored under its column with the right type
+        answers = new_answers("Entire home/apt")
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("4\n2\n1.5\n"), io_out = IOBuffer())
+        @test answers[:accommodates] == 4 && answers[:accommodates] isa Int
+        @test answers[:bedrooms] == 2
+        @test answers[:bathrooms] == 1.5 && answers[:bathrooms] isa Float64
+        @test answers[:room_type] == "Entire home/apt"            # earlier answers are kept
+
+        # 2. exit at the second question: false, the first answer stays, the second is not stored
+        answers = new_answers("Entire home/apt")
+        @test !P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("4\nq\n"), io_out = IOBuffer())
+        @test answers[:accommodates] == 4
+        @test !haskey(answers, :bedrooms)
+
+        # 3. input that ends before all questions are answered: false
+        @test !P.ask_numbers!(new_answers("Entire home/apt"), rules, df, plausibility; io_in = IOBuffer("4\n"), io_out = IOBuffer())
+
+        # 4. a value above the room type's training maximum (6 guests) is refused, then a valid one is accepted
+        answers = new_answers("Entire home/apt")
+        out = IOBuffer()
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("7\n6\n2\n1.5\n"), io_out = out)
+        @test answers[:accommodates] == 6
+        @test occursin("between", String(take!(out)))
+
+        # 5. the limits depend on the room type: a private room allows at most 2 guests
+        answers = new_answers("Private room")
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("3\n2\n1\n1.0\n"), io_out = IOBuffer())
+        @test answers[:accommodates] == 2
+
+        # 6. a plausibility rule uses an earlier answer: with 2 guests, 3 bedrooms are refused
+        answers = new_answers("Entire home/apt")
+        @test P.ask_numbers!(answers, rules, df, plausibility; io_in = IOBuffer("2\n3\n2\n1.5\n"), io_out = IOBuffer())
+        @test answers[:bedrooms] == 2
+
+        # 7. no rules: nothing is asked, true
+        answers = new_answers("Entire home/apt")
+        @test P.ask_numbers!(answers, NamedTuple[], df, plausibility; io_in = IOBuffer(""), io_out = IOBuffer())
+        @test length(answers) == 1
+    end
 end
  

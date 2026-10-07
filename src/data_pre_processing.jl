@@ -622,6 +622,64 @@ function remove_implausible!(df::DataFrame, rules::Vector{<:NamedTuple})
 end
 
 """
+    input_bounds(rule::NamedTuple, answers::AbstractDict, df_training::DataFrame, plausibility_rules::AbstractVector) -> (min_value, max_value)
+
+Smallest and largest value a user may enter for one numeric question.
+
+A fixed limit of the rule is used as it is. If a limit is `nothing`, it is the smallest or largest value of the question's column among the training listings of the room type the user chose; the training data is capped, so the largest value is the cap. For every plausibility rule that belongs to the question, the maximum is also limited by an earlier answer (e.g. bathrooms at most bedrooms + 2). For whole-number questions the limits are rounded inwards.
+
+# Arguments
+- `rule::NamedTuple`:                   One entry of `CONFIG.input_rules` with the fields `column`, `value_type`, `min` and `max`.
+- `answers::AbstractDict`:              Answers so far, by column name; `:room_type` and the answers used by the plausibility rules must be in it.
+- `df_training::DataFrame`:             Training data with the columns `room_type` and the question's column.
+- `plausibility_rules::AbstractVector`: `CONFIG.plausibility_rules`; each rule has `column`, `max_of`, `factor` and `offset`.
+
+# Throws
+- `ArgumentError` if a limit has to come from the data and no training listing has this room type.
+- `ArgumentError` if a plausibility rule needs an answer that is not in `answers` yet (the questions must be asked in the order of the config).
+
+Returns the tuple `(min_value, max_value)`; both are `Int` for an `Int` question.
+"""
+function input_bounds(rule::NamedTuple, answers::AbstractDict, df_training::DataFrame, plausibility_rules::AbstractVector)
+    # 1. the training listings with the room type the user chose
+    # .== compares every row with the chosen room type, the limits are meant for this room type only
+    rows = df_training[df_training.room_type .== answers[:room_type], :]
+
+    # 2. the fixed limit of the rule, or the limit of the data if the rule says nothing
+    # minimum and maximum of an empty table would stop with a confusing message, so the case is checked first (test 8)
+    if nrow(rows) == 0 && (isnothing(rule.min) || isnothing(rule.max))
+        throw(ArgumentError("no training listings with room type \"$(answers[:room_type])\""))
+    end
+    min_value = isnothing(rule.min) ? minimum(rows[!, rule.column]) : rule.min
+    max_value = isnothing(rule.max) ? maximum(rows[!, rule.column]) : rule.max
+    # cond ? a : b gives a if cond is true and b otherwise
+
+    # 3. earlier answers can lower the maximum
+    for plausibility in plausibility_rules
+        # only the rules whose column is this question count, the others belong to other questions (test 5)
+        if plausibility.column == rule.column
+            if !haskey(answers, plausibility.max_of)
+                throw(ArgumentError("answer for :$(plausibility.max_of) is needed before :$(rule.column)"))
+            end
+            # the same limit as in remove_implausible!: column <= factor * max_of + offset
+            limit = plausibility.factor * answers[plausibility.max_of] + plausibility.offset
+            # a limit above the data maximum does not raise the maximum, so the smaller one is taken (test 6)
+            max_value = min(max_value, limit)
+        end
+    end
+
+    # 4. whole-number questions: round inwards
+    # the minimum goes up and the maximum goes down, so every number in between is allowed (test 7)
+    if rule.value_type <: Integer
+        min_value = ceil(Int, min_value)
+        max_value = floor(Int, max_value)
+    end
+
+    # 5. return both limits
+    return (min_value, max_value)
+end
+
+"""
     compute_caps(df::DataFrame, rule::NamedTuple) -> Dict{Tuple{String,Symbol},Float64}
 
 Compute the upper limit (cap) of each size column for each room type.
@@ -656,6 +714,50 @@ function compute_caps(df::DataFrame, rule::NamedTuple)
 
     # 6. return all caps
     return caps
+end
+
+"""
+    cap_values!(df::DataFrame, caps::AbstractDict, rule::NamedTuple) -> DataFrame
+
+Limit the size columns of each listing to the cap of its room type.
+
+A value above the cap becomes the cap; a value below or exactly on the cap stays. No row is removed. The same function is used for the training data and for the user's input.
+
+# Arguments
+- `df::DataFrame`: Listings table with the columns of the rule.
+- `caps::AbstractDict`: Caps from `compute_caps`, keyed by `(room_type, column)`.
+- `rule::NamedTuple`: Cap rule with the fields `columns` (the columns to cap) and `group_by` (the column with the room type).
+
+Returns the modified DataFrame in place. Throws an `ArgumentError` if a room type has no cap.
+"""
+function cap_values!(df::DataFrame, caps::AbstractDict, rule::NamedTuple)
+    # 1. go through the rows one by one
+    for i in 1:nrow(df)
+        # 2. the room type of this row
+        # the caps are looked up by room type and column
+        room_type = String(df[i, rule.group_by])
+
+        # 3. check every column of the rule
+        for column in rule.columns
+            # 4. the key of this cap
+            key = (room_type, column)
+
+            # 5. a room type without a cap is an error
+            # at prediction time this means the room type was not in the training data
+            if !haskey(caps, key)
+                throw(ArgumentError("no cap for room type \"$room_type\" and column $column"))
+            end
+
+            # 6. only a value above the cap is lowered
+            # the caps are whole numbers, so an Int column stays an Int column
+            if df[i, column] > caps[key]
+                df[i, column] = caps[key]
+            end
+        end
+    end
+
+    # 7. return the modified table
+    return df
 end
 
 """
