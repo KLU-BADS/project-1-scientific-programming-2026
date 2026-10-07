@@ -305,5 +305,29 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
     # a new apartment has no booking history, so its nights are only a guess and no range is shown
     println(io)
 
+    # 6. tips: up to 3 missing amenities that would raise the price, then the rating tips
+    println(io, "Ways to raise your price")
+    if nrow(result.tips) == 0
+        println(io, "  No missing amenity has a clear price effect.")
+    else
+        for row in eachrow(first(result.tips, 3))
+            label = CONFIG.amenity_labels[row.amenity]
+            println(io, "  + ", label, "   +", format_eur(row.change; digits = 2), " per night (+", round(row.change_pct; digits = 1), "%)")
+        end
+    end
+    # first(table, 3) keeps the first 3 rows; the tips are already sorted from the largest effect down
+    # CONFIG.amenity_labels turns the column name :has_AC into the readable "Air conditioning"
+
+    step = CONFIG.rating_tips.step
+    for row in eachrow(result.rating_tips)
+        name = replace(String(row.score), "review_scores_" => "")
+        println(io, "  Listings rated $step higher for $name charge about $(round(row.pct_per_step; digits = 1))% more.")
+    end
+    # replace cuts the prefix, so :review_scores_cleanliness becomes "cleanliness"
+    println(io)
+
+    # 7. footer: the numbers describe comparable listings, they do not promise anything
+    println(io, "Based on comparable listings, not a guarantee.")
+
     return nothing
 end

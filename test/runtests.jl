@@ -1493,6 +1493,34 @@ const P = Project1
         unknown = merge(listed, (assessment = (status = :cheap, difference = 5.0),))
         @test_throws KeyError P.visualize_results(unknown; io = IOBuffer())
         # :cheap is not one of the five statuses, so the Dict lookup throws a KeyError
+
+        # 7. happy path: the amenity tip, the rating tip and the footer are printed
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("+ Air conditioning   +€7.50 per night (+7.8%)", output)
+        @test occursin("Listings rated 0.1 higher for cleanliness charge about 1.3% more.", output)
+        @test occursin("Based on comparable listings, not a guarantee.", output)
+
+        # 8. edge case: an empty tips table prints the sentence instead of tips
+        no_tips = merge(listed, (tips = DataFrame(amenity = Symbol[], change = Float64[], change_pct = Float64[]),))
+        io = IOBuffer()
+        P.visualize_results(no_tips; io = io)
+        @test occursin("No missing amenity has a clear price effect.", String(take!(io)))
+
+        # 9. edge case: with five tips only the first three are shown
+        five_tips = merge(listed, (tips = DataFrame(amenity = [:has_AC, :has_tv, :has_kettle, :has_washer, :has_dishwasher],
+                                                    change = [7.5, 5.0, 3.0, 2.0, 1.0],
+                                                    change_pct = [7.8, 5.2, 3.1, 2.1, 1.0]),))
+        io = IOBuffer()
+        P.visualize_results(five_tips; io = io)
+        @test count("per night", String(take!(io))) == 3
+        # count gives how often the text appears, every tip line contains "per night" once
+
+        # 10. error case: an amenity without a label in CONFIG is rejected
+        unknown_amenity = merge(listed, (tips = DataFrame(amenity = [:has_jacuzzi], change = [9.0], change_pct = [9.0]),))
+        @test_throws KeyError P.visualize_results(unknown_amenity; io = IOBuffer())
+
     end
 
     # ------------------------------------------------------------------------------------------
