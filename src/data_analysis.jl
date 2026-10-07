@@ -415,7 +415,7 @@ Returns `(median, mean, lower, upper)`, each a `Vector{Float64}` with one value 
 """
 function predict_price_range(fit::NamedTuple, df_new::DataFrame; level::Real = 0.8)
     # 1. turn the rows into the matrix of predictors the model was trained on
-    predictor_matrix = prepare_predictors(df_new, fit.spec)
+    predictor_table = prepare_predictors(df_new, fit.spec)
     
     # 2. predict with a prediction interval: a table with columns prediction, lower, and upper 
     predictions = predict(fit.model, predictor_matrix; interval = :prediction, level = level)
