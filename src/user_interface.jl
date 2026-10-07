@@ -31,7 +31,7 @@ end
 
 
 """
-    ask_number(prompt, T, min_val = -Inf, max_val = Inf, inclusive_interval = false; io_in = stdin, io_out = stdout) -> Union{T, Nothing}
+    ask_number(prompt, T, min_value = -Inf, max_value = Inf, inclusive_interval = false; io_in = stdin, io_out = stdout) -> Union{T, Nothing}
 
 User interface in the REPL allowing a user to enter a number. Repeats the question until a valid number in the
 permitted range is entered.
