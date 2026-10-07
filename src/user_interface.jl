@@ -61,7 +61,7 @@ julia> Project1.ask_number("Guests: ", Int, 1, 16, true; io_in = IOBuffer("q\\n"
 true
 ```
 """
-function ask_number(prompt::AbstractString, T::Type{<:Real}, min_val::Real = -Inf, max_val::Real = Inf, inclusive_interval::Bool = false; io_in::IO = stdin, io_out::IO = stdout)
+function ask_number(prompt::AbstractString, T::Type{<:Real}, min_value::Real = -Inf, max_value::Real = Inf, inclusive_interval::Bool = false; io_in::IO = stdin, io_out::IO = stdout)
     while true
         # write prompt to terminal
         print(io_out, prompt)
@@ -72,9 +72,9 @@ function ask_number(prompt::AbstractString, T::Type{<:Real}, min_val::Real = -In
         # read line, remove white spaces and parse number
         input = strip(readline(io_in))
         lowercase(input) in ("q", "quit", "exit") && return nothing
-        num = tryparse(T, input)
+        value = tryparse(T, input)
         # not a number: ask again
-        if isnothing(num)
+        if isnothing(value)
             if T <: Integer
                 println(io_out, "Not a valid input, enter a whole number!")
             else
@@ -83,8 +83,8 @@ function ask_number(prompt::AbstractString, T::Type{<:Real}, min_val::Real = -In
             continue
         end
         # check range
-        in_range = inclusive_interval ? (num >= min_val && num <= max_val) : (num > min_val && num < max_val)
-        in_range && return num
-        println(io_out, "Please enter a number between $(min_val) and $(max_val).")
+        in_range = inclusive_interval ? (value >= min_value && value <= max_value) : (value > min_value && value < max_value)
+        in_range && return value
+        println(io_out, "Please enter a number between $(min_value) and $(max_value).")
     end
 end
