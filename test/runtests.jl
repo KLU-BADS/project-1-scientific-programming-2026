@@ -1352,6 +1352,54 @@ const P = Project1
         @test_throws MissingException P.get_r2(y1,y_hat) 
     end
 
+     @testset "predict_price_range" begin 
+        # 1. test setup 
+        x = 1:20
+        error_term = 0.1 .* sin.(x)
+        df = DataFrame(accommodates = x, price = exp.(3.0 .+ 0.1 .* x .+ error_term))
+        spec = (target = :price,
+            log_scale = true,
+            log1p_predictors = Symbol[],
+            predictors = [:accommodates])
+        fit = P.regression_city(df, spec)
+
+        # 2. call function, keeping a copy of the input to check it is not changed
+        df_before = copy(df)
+        result = P.predict_price_range(fit, df)
+        
+        # 3. the lower bound is below the median and median is below upper bound
+        @test all(result.lower .<= result.median)
+        @test all(result.median .<= result.upper)
+
+        # 4. smearing lifts the mean above the median 
+        @test all(result.mean .>= result.median)
+
+        # 5. a 95% range covers more apartments, so it is wider than the 80% range
+        result_95 = P.predict_price_range(fit, df; level = 0.95)
+        width_80 = result.upper .- result.lower
+        width_95 = result_95.upper .- result_95.lower 
+
+        @test all(width_95 .> width_80)
+
+        # 6. the input table remains the same
+        @test df == df_before
+
+        # 7. log_scale = false
+         x = 1:20
+        error_term = 0.1 .* sin.(x)
+        df_2 = DataFrame(accommodates = x, price = exp.(3.0 .+ 0.1 .* x .+ error_term))
+        spec_2 = (target = :price,
+            log_scale = false,
+            log1p_predictors = Symbol[],
+            predictors = [:accommodates])
+        fit_2 = P.regression_city(df_2, spec_2)
+
+        df_before_2 = copy(df_2)
+        result_2 = P.predict_price_range(fit_2, df_2)    
+
+        @test result_2.median ≈ result_2.mean
+        @test df_2 == df_before_2
+
     @testset "assess_listing" begin 
         lower = 66.0
         upper = 140.0
