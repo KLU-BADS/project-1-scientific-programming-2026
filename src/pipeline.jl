@@ -1,12 +1,16 @@
 """
-    run_training_pipeline(filepath = CONFIG.filepath) -> DataFrame
+    run_training_pipeline(filepath = CONFIG.filepath) -> NamedTuple
 
 Run data pre-processing pipeline for the training data used in the regression model. Import the listings.csv 
 file into a DataFrame and run all pre-processing steps in the order of the design: select columns, rename, 
 set types, remove duplicates and listings without bookings, handle missing values, remove zero denominators 
 and outliers,  create dummies, ratios and the distance to the city center. Every step is controlled by `CONFIG`.
 
-Returns processed listing as DataFrame `df`.
+Returns a named tuple `(df, fitted)`:
+- `df`: the processed listings as DataFrame.
+- `fitted`: the values learned from the training data, which the inference pipeline has to reuse on a single
+  apartment: `caps` (upper limits per room type), `kept_districts` (districts that are not grouped as rare)
+  and `square_centers` (the centres of the squared columns).
 
 <!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
@@ -34,6 +38,7 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
         calculate_ratio!(df, rule)
     end
     calculate_distance!(df, CONFIG.distance_rule, CONFIG.cities[CONFIG.city].center)
+<<<<<<< HEAD
     kept = kept_categories(df, CONFIG.category_rule)
     group_rare_categories!(df, CONFIG.category_rule, kept)
     centers = Dict{Symbol,Float64}()
@@ -42,16 +47,29 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
         calculate_square!(df, rule, centers[rule.source])
     end
     return (df = df, fitted = (caps = caps, kept_districts = kept, square_centers = centers))
+=======
+    # 1. the values learned from the training data
+    # the new steps (caps, rare districts, squares) will fill these; until they are implemented the values are empty placeholders
+    # TODO: replace the placeholders with the results of compute_caps, kept_categories and square_center
+    fitted = (
+        caps = Dict{Tuple{String,Symbol},Float64}(),
+        kept_districts = String[],
+        square_centers = Dict{Symbol,Float64}(),
+    )
+    # 2. return the cleaned table together with the learned values
+    # a named tuple lets the caller write result.df and result.fitted
+    return (df = df, fitted = fitted)
+>>>>>>> origin/main
 end
 
 """
     run_analysis_pipeline(df)
 
-Split the processed listings `df` (the result of `run_training_pipeline`) into a training and a test set,
+Split the processed listings `df` (`result.df` of `run_training_pipeline`) into a training and a test set,
 fit every model in `CONFIG.regression_models` on the training set, and score it on the test set.
 
 # Arguments
-- `df::DataFrame`: Processed listings data returned by `run_training_pipeline()`.
+- `df::DataFrame`: Processed listings table, the `df` part of the result of `run_training_pipeline()`.
 
 Returns a named tuple containing the fitted models, their scores, the training set, and the test set.
 The returned values are ordered the same way as `CONFIG.regression_models`, and the split is controlled by
