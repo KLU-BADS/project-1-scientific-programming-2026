@@ -1677,6 +1677,54 @@ const P = Project1
         # visualize_results needs the columns even when there are no rows
     end
 
+    @testset "rating_effects" begin
+        # 1. made-up data: cleanliness raises the price (coefficient 0.122), accuracy lowers it (-0.10)
+        random_n_generator = P.Random.Xoshiro(42)
+        n = 200
+        cleanliness = 4.5 .+ 0.3 .* randn(random_n_generator, n)
+        accuracy = 4.5 .+ 0.3 .* randn(random_n_generator, n)
+        # scores around 4.5 with a small spread, like real review scores
+        price = exp.(4.0 .+ 0.122 .* cleanliness .+ -0.10 .* accuracy .+ 0.001 .* randn(random_n_generator, n))
+        # exp. makes it a log model: each coefficient is a change in the log of the price
+        # the noise is tiny (0.001), so the model finds the coefficients almost exactly
+        df = DataFrame(review_scores_cleanliness = cleanliness, review_scores_accuracy = accuracy, price = price)
+
+        # 2. fit a log model on the two scores
+        spec = (target = :price, log_scale = true, log1p_predictors = Symbol[],
+                predictors = [:review_scores_cleanliness, :review_scores_accuracy])
+        fit = P.regression_city(df, spec)
+
+        # 3. ask for three scores: the two in the model, and location, which is not in the model
+        tips = P.rating_effects(fit, [:review_scores_cleanliness, :review_scores_accuracy, :review_scores_location]; step = 0.1)
+
+        # 4. the table has the two columns visualize_results reads
+        @test names(tips) == ["score", "pct_per_step"]
+        # visualize_results reads row.score and row.pct_per_step, so the names must match exactly
+
+        # 5. cleanliness is the only tip, and 0.122 gives about 1.23% per 0.1 point
+        @test tips.score[1] == :review_scores_cleanliness
+        # cleanliness is significant and positive, so it is the first (and only) row
+        @test isapprox(tips.pct_per_step[1], 1.23; atol = 0.01)
+        # 100 * (exp(0.1 * 0.122) - 1) = 1.2275, the value the spec asks for
+
+        # 6. a negative coefficient is left out
+        @test :review_scores_accuracy ∉ tips.score
+        # accuracy is significant, but a negative effect is no tip to raise the price
+
+        # 7. a column that is not in the model is left out, without an error
+        @test :review_scores_location ∉ tips.score
+        # location fails the significance check first, so findfirst is never run on a missing name
+
+        # 8. if nothing qualifies, the table is empty but keeps its columns
+        no_tips = P.rating_effects(fit, [:review_scores_cleanliness, :review_scores_accuracy, :review_scores_location]; step = 0.1, alpha = 0.0)
+        # no p-value is below 0, so with alpha = 0.0 no score passes the significance check
+        @test nrow(no_tips) == 0
+        # the table has no rows
+        @test names(no_tips) == names(tips)
+        # the columns are still there, so the printer can loop over an empty table without an error
+    end
+
+
     # ------------------------------------------------------------------------------------------
     # visualization.jl
     # ------------------------------------------------------------------------------------------

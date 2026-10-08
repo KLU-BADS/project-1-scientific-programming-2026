@@ -696,3 +696,53 @@ function amenity_effects(fit::NamedTuple, df_row::DataFrame, amenities::Abstract
     sort!(effects, :change, rev = true)
     return effects
 end
+
+"""
+    rating_effects(fit::NamedTuple, columns::AbstractVector{Symbol};
+                   step::Real = 0.1, alpha::Real = 0.05) -> DataFrame
+
+Percent price change per `step` points of each review sub-score.
+
+A score is kept only if its term is significant and its coefficient is positive.
+For a kept score with coefficient `b`, the change is `100 * (exp(step * b) - 1)` percent.
+A step of 0.1 is used because most listings score above 4.6, so a whole point is unrealistic.
+The effects are associations seen in comparable listings, not proven causes.
+
+# Arguments
+- `fit::NamedTuple`: the `:price_explain` fit from `regression_city`, with the field `model`.
+- `columns::AbstractVector{Symbol}`: the sub-scores to report (`CONFIG.rating_tips.columns`).
+- `step::Real = 0.1`: the score change the percent refers to (`CONFIG.rating_tips.step`).
+- `alpha::Real = 0.05`: the significance level (`CONFIG.significance_level`).
+
+Returns a `DataFrame` with the columns `score` (Symbol) and `pct_per_step` (percent),
+largest effect first. It is empty, with the same columns, if nothing qualifies.
+A column that is not a term of the model is left out.
+
+# Examples
+```julia
+explain_fit = regression_city(df_training, explain_spec)
+rating_effects(explain_fit, CONFIG.rating_tips.columns; step = CONFIG.rating_tips.step)
+```
+"""
+function rating_effects(fit::NamedTuple, columns::AbstractVector{Symbol}; step::Real = 0.1, alpha::Real = 0.05)
+    # 1. prepare: the significant term names, all term names and the coefficients (in the same order)
+    significant_names = significant_terms(fit; alpha = alpha)
+    term_names = coefnames(fit.model)
+    coefficient = coef(fit.model)
+
+    # 2. for each score that is significant with a positive coefficient,
+    #    record the percent price change per step
+    effects = DataFrame(score = Symbol[], pct_per_step = Float64[])
+    for column in columns
+        if string(column) in significant_names
+            b = coefficient[findfirst(==(string(column)), term_names)]
+            if b > 0
+                push!(effects, (score = column, pct_per_step = 100 * (exp(step * b) - 1)))
+            end
+        end
+    end
+
+    # 3. return the table with the largest effect first
+    sort!(effects, :pct_per_step, rev = true)
+    return effects
+end
