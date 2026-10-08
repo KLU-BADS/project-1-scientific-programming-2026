@@ -14,6 +14,118 @@ function gui()
 
 end
 
+
+"""
+    enter_apartment_data(group, df_training; io_in = stdin, io_out = stdout) -> Dict{Symbol,Any} or nothing
+
+Ask the user every question about one apartment and collect the answers under their final column names,
+so they can be turned into a one-row table for the model. The questions, in this order:
+
+1. room type (menu, only room types with enough training listings);
+2. size questions (guests, bedrooms, beds, bathrooms, minimum nights), limited by the room type;
+3. location (latitude and longitude), from which the district is derived;
+4. amenities (multiple choice), stored as 0/1 columns;
+5. Superhost (yes/no), stored as 0/1;
+6. listed apartments only: current price, average rating and booked nights.
+   New apartments get the median training rating instead, without a question.
+
+# Arguments
+- `group::Symbol`:              `:new` for an apartment that is not listed yet, `:listed` for a listed one.
+- `df_training::DataFrame`:     training data, used for the menu options and the limits of every question.
+- `io_in::IO`:                  input stream for the typed questions (default `stdin`).
+- `io_out::IO`:                 output stream for the prompts and messages (default `stdout`).
+
+The two menus always use the terminal, so this function is tested by hand; its parts are tested on their own.
+
+# Throws
+- `ArgumentError`   if `group` is not `:new` or `:listed`.
+
+Returns a `Dict{Symbol,Any}` with the answers, or `nothing` as soon as the user leaves at any question.
+For listed apartments it also contains `:price` and `:estimated_occupancy_l365d`; the price is compared
+with the predicted range and is not a predictor.
+"""
+function enter_apartment_data(group::Symbol, df_training::DataFrame; io_in::IO = stdin, io_out::IO = stdout)
+    # throw exception if group name is wrong
+    group in (:new, :listed) || throw(ArgumentError("group must be :new or :listed"))
+    
+    # empty dictionary to collect the user responses
+    answers = Dict{Symbol,Any}()
+   
+    # decide which type of rooms to offer based on sufficient observations of this room type in training set
+    room_type_options = get_room_type_options(df_training, CONFIG.min_room_type_count)
+    # get user input
+    room_type_input = ask_choice("Room type", room_type_options)
+    isnothing(room_type_input) && return nothing
+    answers[:room_type] = room_type_input
+    
+    # get the size rules valid for both groups
+    size_rules = filter(rule -> :new in rule.groups, CONFIG.input_rules)
+    # get number user inputs in order specified in size_rules
+    ask_numbers!(answers, size_rules, df_training, CONFIG.plausibility_rules; io_in = io_in, io_out = io_out) || return nothing
+    
+    # get location of apartment and derive district
+    location_input = ask_location(df_training, CONFIG.distance_rule, CONFIG.location_rule, CONFIG.cities[CONFIG.city].center; io_in = io_in, io_out = io_out)
+    isnothing(location_input) && return nothing
+    answers[:latitude] = location_input.latitude
+    answers[:longitude] = location_input.longitude
+    answers[:district] = derive_district(location_input.latitude, location_input.longitude, df_training, CONFIG.distance_rule)
+
+    # let the user select available amenities
+    amenity_columns = get_amenity_columns(CONFIG.dummy_rules)
+    amenities_selection = ask_multiple("Amenities (Enter = select, d = done)", [CONFIG.amenity_labels[amenity] => amenity for amenity in amenity_columns])
+    merge!(answers, selection_to_dummies(amenities_selection, amenity_columns))
+
+    # get users superhost status
+    superhost_input = ask_yes_no("Are you already a Superhost (also from other listings)? "; io_in = io_in, io_out = io_out)
+    isnothing(superhost_input) && return nothing
+    answers[:is_superhost] = Int(superhost_input)
+
+    # get ratings scores
+    if group == :new
+        # median inserted for new apartments without review --> neutral
+        answers[:review_scores_rating] = median(df_training.review_scores_rating)
+    else
+        listed_rules = filter(r -> !(:new in r.groups), CONFIG.input_rules)
+        ask_numbers!(answers, listed_rules, df_training, CONFIG.plausibility_rules; io_in = io_in, io_out = io_out) || return nothing
+    end
+    return answers
+end
+
+"""
+    get_room_type_options(df_training, min_room_type_count) -> Vector{Pair{String,String}}
+
+Return the room types to offer in the room type menu, as `label => value` pairs for `ask_choice`.
+Only room types with at least `min_room_type_count` training listings are offered, because rarer ones
+give no reliable price limits or prediction.
+
+# Arguments
+- `df_training::DataFrame`:         training data with the column `room_type`.
+- `min_room_type_count::Integer`:   smallest number of listings a room type needs, e.g. `CONFIG.min_room_type_count`.
+
+# Throws
+- `MethodError`   if `min_room_type_count` is not a whole number, e.g. `2.5`.
+
+Returns the pairs sorted alphabetically; label and value are the same text, exactly as in the data
+(e.g. `"Entire home/apt" => "Entire home/apt"`). The text is always a plain `String`, also when CSV
+read the column with a compact text type such as `String15`. Returns an empty list if no room type
+has enough listings.
+
+# Examples
+```jldoctest
+julia> df = DataFrame(room_type = ["Private room", "Entire home/apt", "Entire home/apt", "Hotel room"]);
+
+julia> Project1.get_room_type_options(df, 2)
+1-element Vector{Pair{String, String}}:
+ "Entire home/apt" => "Entire home/apt"
+```
+"""
+function get_room_type_options(df_training::DataFrame, min_room_type_count::Integer)
+    counts = combine(groupby(df_training, :room_type), nrow => :n) 
+    filter_room_types = filter(row -> row.n >= min_room_type_count, counts)
+    room_types = sort(filter_room_types.room_type)
+    return [String(rt) => String(rt) for rt in room_types]
+end
+
 """
     ask_choice(title, options) -> value or nothing
 
