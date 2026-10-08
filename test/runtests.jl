@@ -33,6 +33,33 @@ const P = Project1
         # - a path that does not exist throws an error
         @test_broken false
     end
+
+    @testset "import_user_input" begin
+        answers = Dict{Symbol,Any}(:room_type => "Entire home/apt", :bedrooms => 2, :bathrooms => 1.5)
+
+        result = P.import_user_input(answers)
+
+        # 1. one row, one column per answer, sorted alphabetically
+        @test nrow(result) == 1
+        @test names(result) == ["bathrooms", "bedrooms", "room_type"]
+
+        # 2. every value arrives unchanged, with its type
+        @test result.room_type[1] == "Entire home/apt"
+        @test result.bedrooms[1] == 2 && result.bedrooms[1] isa Int
+        @test result.bathrooms[1] == 1.5
+
+        # 3. the dictionary is not changed
+        @test length(answers) == 3
+
+        # 4. an answer that is nothing is refused, and the message names the column
+        incomplete = Dict{Symbol,Any}(:bedrooms => 2, :beds => nothing)
+        @test_throws ArgumentError P.import_user_input(incomplete)
+        err = try P.import_user_input(incomplete) catch e; e end
+        @test occursin("beds", err.msg)
+
+        # 5. keys that are not Symbols do not match the signature
+        @test_throws MethodError P.import_user_input(Dict("bedrooms" => 2))
+    end
  
     # ------------------------------------------------------------------------------------------
     # data_pre_processing.jl
