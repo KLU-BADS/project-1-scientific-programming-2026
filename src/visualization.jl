@@ -116,15 +116,20 @@ Print a histogram of the price per night of all listings in `df`, to show how th
 Returns `nothing`, the chart is only printed.
 """
 function plot_price_distribution(df::DataFrame; nbins::Int = 20, io::IO = stdout)
-    # 1. build the histogram: the prices are sorted into nbins bands of equal width
-    chart = histogram(df.price; nbins = nbins, title = "Price per night (EUR)")
+    # 1. the prices as plain numbers, without empty cells
+    prices = collect(skipmissing(df.price))
+    # CSV stores the column as Union{Missing, Float64}, histogram only accepts plain numbers
+    # skipmissing leaves out empty cells, collect turns the result into a normal vector
+
+    # 2. build the histogram: the prices are sorted into nbins bands of equal width
+    chart = histogram(prices; nbins = nbins, title = "Price per night (EUR)")
     # histogram counts how many listings fall into each price band and draws one bar per band
 
-    # 2. print the chart to io
+    # 3. print the chart to io
     println(io, chart)
     # io is the terminal by default; the tests pass an IOBuffer instead, which collects the text so it can be checked
 
-    # 3. nothing to give back, the chart has only been printed
+    # 4. nothing to give back, the chart has only been printed
     return nothing
 end
 
@@ -159,8 +164,8 @@ function plot_price_by_room_type(df::DataFrame, min_count::Int; io::IO = stdout)
     end
 
     # 4. collect the prices of each kept room type
-    data = [df.price[df.room_type .== rt] for rt in rts]
-    # for every room type rt, take the prices of the rows whose room_type equals rt: one vector of prices per box
+    data = [collect(skipmissing(df.price[df.room_type .== rt])) for rt in rts]
+    # for every room type rt, take its prices without empty cells: one vector of plain numbers per box
 
     # 5. draw one box per room type and print the chart
     chart = boxplot(String.(rts), data; title = "Price by room type", xlabel = "EUR")
@@ -359,6 +364,21 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout)
             "  (middle half ", format_eur(q1), " to ", format_eur(q3), ")")
     println(io, "Median yearly revenue    ", format_eur(median(df.estimated_revenue)))
     # quantile at 0.25 and 0.75 gives the two prices between which the middle 50% of all listings lie
+    println(io)
+    # 4. the price charts: how the prices are spread, and the price per room type
+    plot_price_distribution(df; io = io)
+    plot_price_by_room_type(df, CONFIG.min_room_type_count; io = io)
+    println(io)
+    # room types with fewer listings than CONFIG.min_room_type_count get no box of their own
+
+    # 5. model quality: for every model, how much of the differences it explains and its typical error
+    for (fit, score) in zip(analysis.fits, analysis.scores)
+        explained = round(Int, 100 * score.r2_model_scale)
+        println(io, "Model $(fit.spec.name): explains $explained% of the differences, typical error about ",
+                format_eur(score.median_ae))
+    end
+    # zip walks through the fits and their scores side by side, the scores are in the same order as the fits
+    # median_ae is the typical (median) distance between the predicted and the real value, in euros
     println(io)
 
     return nothing

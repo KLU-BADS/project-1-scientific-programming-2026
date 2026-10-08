@@ -1675,7 +1675,14 @@ const P = Project1
         P.plot_price_distribution(df; nbins = 3, io = io)
         @test occursin("Price per night (EUR)", String(take!(io)))
 
-        # 3. error case: a table without a price column is rejected
+        # 3. edge case: a price column read like CSV does, with room for empty cells and one empty cell
+        df_csv = DataFrame(price = Union{Missing, Float64}[50.0, 60.0, missing, 80.0, 90.0])
+        io = IOBuffer()
+        P.plot_price_distribution(df_csv; io = io)
+        @test occursin("Price per night (EUR)", String(take!(io)))
+        # the empty cell is skipped, the four prices are drawn
+
+        # 4. error case: a table without a price column is rejected
         @test_throws ArgumentError P.plot_price_distribution(DataFrame(x = [1, 2]); io = IOBuffer())
         # DataFrames throws ArgumentError when df.price does not exist
     end
@@ -1705,7 +1712,14 @@ const P = Project1
         P.plot_price_by_room_type(df, 10; io = io)
         @test occursin("No room type has at least 10 listings.", String(take!(io)))
 
-        # 4. error case: a table without a room_type column is rejected
+        # 4. edge case: a price column read like CSV does, with one empty cell
+        df_csv = DataFrame(room_type = ["Entire home/apt", "Entire home/apt", "Private room", "Private room"],
+                           price = Union{Missing, Float64}[120.0, missing, 50.0, 70.0])
+        io = IOBuffer()
+        P.plot_price_by_room_type(df_csv, 1; io = io)
+        @test occursin("Price by room type", String(take!(io)))
+
+        # 5. error case: a table without a room_type column is rejected
         @test_throws ArgumentError P.plot_price_by_room_type(DataFrame(price = [100.0]), 1; io = IOBuffer())
         # groupby throws ArgumentError when the column does not exist
     end
@@ -1877,9 +1891,14 @@ const P = Project1
     @testset "visualize_general_findings" begin
         # a small made-up analysis: 4 training and 2 test listings, so the numbers can be checked by hand
         analysis = (
-            df_training = DataFrame(price = [40.0, 60.0, 80.0, 100.0], estimated_revenue = [1000.0, 2000.0, 3000.0, 4000.0]),
-            df_test = DataFrame(price = [120.0, 140.0], estimated_revenue = [5000.0, 6000.0]),
+            df_training = DataFrame(price = [40.0, 60.0, 80.0, 100.0], estimated_revenue = [1000.0, 2000.0, 3000.0, 4000.0],
+                                    room_type = ["Entire home/apt", "Entire home/apt", "Private room", "Private room"]),
+            df_test = DataFrame(price = [120.0, 140.0], estimated_revenue = [5000.0, 6000.0],
+                                room_type = ["Entire home/apt", "Private room"]),
+            fits = NamedTuple[],
+            scores = NamedTuple[],
         )
+        # no fits and no scores yet, the real models are tested at the end of this test set
 
         # 1. happy path: the header counts all six listings and names the city from CONFIG
         io = IOBuffer()
@@ -1896,6 +1915,21 @@ const P = Project1
         # 3. error case: an analysis without the test set is rejected
         @test_throws FieldError P.visualize_general_findings((df_training = analysis.df_training,); io = IOBuffer())
         # a NamedTuple without the field df_test gives a FieldError when it is read
+
+        # 4. edge case: with only six listings no room type reaches the minimum count, so a message replaces the boxplot
+        @test occursin("Price per night (EUR)", output)
+        @test occursin("No room type has at least $(P.CONFIG.min_room_type_count) listings.", output)
+
+        # 5. happy path: on the real analysis every model gets one quality line with its name
+        real_analysis = P.run_analysis_pipeline(P.run_training_pipeline().df)
+        io = IOBuffer()
+        P.visualize_general_findings(real_analysis; io = io)
+        real_output = String(take!(io))
+        for spec in P.CONFIG.regression_models
+            @test occursin("Model $(spec.name): explains", real_output)
+        end
+        @test occursin("Price by room type", real_output)
+        # the real data has room types with enough listings, so the boxplot is drawn
     end
 
     # ------------------------------------------------------------------------------------------
