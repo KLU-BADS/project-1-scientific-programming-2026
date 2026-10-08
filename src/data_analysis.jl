@@ -630,3 +630,57 @@ function significant_terms(fit::NamedTuple; alpha::Real = 0.05)
     return coefficient_table.rownms[is_significant]
 
 end
+
+"""
+    amenity_effects(fit::NamedTuple, df_row::DataFrame, amenities::AbstractVector{Symbol};
+                    alpha::Real = 0.05, min_effect_pct::Real = 1.0) -> DataFrame
+
+Price effect of each amenity that the apartment does not have yet.
+
+An amenity is kept only if the apartment lacks it (value 0 in `df_row`), its term is
+significant, and its effect is at least `min_effect_pct` percent. For each kept amenity
+the price is predicted twice, as the apartment is and with the amenity switched on.
+The effects are associations seen in comparable listings, not proven causes.
+
+# Arguments
+- `fit::NamedTuple`: a fit from `regression_city`, with the field `model`.
+- `df_row::DataFrame`: the prepared one-row table of the apartment.
+- `amenities::AbstractVector{Symbol}`: the amenities a host can add (`CONFIG.actionable_amenities`).
+- `alpha::Real = 0.05`: the significance level (`CONFIG.significance_level`).
+- `min_effect_pct::Real = 1.0`: the smallest effect in percent worth showing (`CONFIG.min_effect_pct`).
+
+Returns a `DataFrame` with the columns `amenity` (Symbol), `change` (euros per night) and
+`change_pct` (percent), largest `change` first. It is empty, with the same columns, if
+nothing qualifies.
+"""
+function amenity_effects(fit::NamedTuple, df_row::DataFrame, amenities::AbstractVector{Symbol}; alpha::Real = 0.05, min_effect_pct::Real = 1.0)
+    # 1. prepare: the significant term names, all term names and the coefficients (in the same order)
+    significant_names = significant_terms(fit; alpha = alpha)
+    term_names = coefnames(fit.model)
+    coefficient = coef(fit.model)
+    # 2. choose the amenities: the apartment does not have it yet, its term is significant,
+    #    and its effect in percent is at least min_effect_pct
+    chosen_amenities = Symbol[]
+    for a in amenities 
+        if df_row[1, a] == 0 && string(a) in significant_names && 100 * (exp(coefficient[findfirst(==(string(a)), term_names)]) -1) >= min_effect_pct
+        # checks if an amenity in the apartment is not present (== 0), checks the model if amenity is significant, and checks if the % change in this coefficient is greater than minimum
+            push!(chosen_amenities, a)
+        end
+    end 
+    # 3. predict the price of the apartment as it is now (the base price)
+    base_price = predict_apartment_performance(fit, df_row)[1]
+    # 4. for each chosen amenity: switch it on in a copy of the row, predict again,
+    effects = DataFrame(amenity = Symbol[], change = Float64[], change_pct = Float64[])
+    for a in chosen_amenities 
+        row = copy(df_row)
+        row[1, a] = 1 
+        new_price = predict_apartment_performance(fit, row)[1]
+        push!(effects, (amenity = a,
+        change = new_price - base_price,
+        change_pct = 100 * (new_price / base_price -1)))
+    end
+    #    and record the amenity, the change in euros and the change in percent
+    # 5. return the table with the largest change first (an empty table with the same columns if nothing was chosen)
+    sort!(effects, :change, rev = true)
+    return effects
+end
