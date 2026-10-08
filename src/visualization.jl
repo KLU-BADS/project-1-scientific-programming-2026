@@ -1,4 +1,4 @@
-using DataFrames, Printf, UnicodePlots
+using DataFrames, Printf, Statistics, UnicodePlots
 
 """
     format_eur(x; digits = 0)
@@ -328,6 +328,38 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
 
     # 7. footer: the numbers describe comparable listings, they do not promise anything
     println(io, "Based on comparable listings, not a guarantee.")
+
+    return nothing
+end
+
+"""
+    visualize_general_findings(analysis; io = stdout)
+
+Print the market findings screen: the size and price level of the city's market, the price charts,
+how well the models predict, what drives the price, and how close the predictions are on the test set.
+
+# Arguments
+- `analysis::NamedTuple`:   The result of `run_analysis_pipeline` with `fits`, `scores`, `df_training` and `df_test`.
+- `io::IO`:                 Where the screen is printed (default `stdout`, the terminal).
+
+Returns `nothing`, the screen is only printed.
+"""
+function visualize_general_findings(analysis::NamedTuple; io::IO = stdout)
+    # 1. all listings of the city: the training and the test set together
+    df = vcat(analysis.df_training, analysis.df_test)
+    # vcat puts the rows of the second table under the rows of the first one
+
+    # 2. header: the city and how many listings the findings are based on
+    printstyled(io, "$(uppercase(CONFIG.city)) AIRBNB MARKET · $(nrow(df)) listings\n"; bold = true)
+    println(io, "─"^50)
+
+    # 3. overview: the typical price, the middle half of all prices, and the typical yearly revenue
+    q1, q3 = quantile(df.price, [0.25, 0.75])
+    println(io, "Median price per night   ", format_eur(median(df.price)),
+            "  (middle half ", format_eur(q1), " to ", format_eur(q3), ")")
+    println(io, "Median yearly revenue    ", format_eur(median(df.estimated_revenue)))
+    # quantile at 0.25 and 0.75 gives the two prices between which the middle 50% of all listings lie
+    println(io)
 
     return nothing
 end

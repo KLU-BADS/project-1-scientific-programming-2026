@@ -1874,6 +1874,30 @@ const P = Project1
         # @testset ... for runs the same two tests once for every row of the list, each as its own small test set
     end
 
+    @testset "visualize_general_findings" begin
+        # a small made-up analysis: 4 training and 2 test listings, so the numbers can be checked by hand
+        analysis = (
+            df_training = DataFrame(price = [40.0, 60.0, 80.0, 100.0], estimated_revenue = [1000.0, 2000.0, 3000.0, 4000.0]),
+            df_test = DataFrame(price = [120.0, 140.0], estimated_revenue = [5000.0, 6000.0]),
+        )
+
+        # 1. happy path: the header counts all six listings and names the city from CONFIG
+        io = IOBuffer()
+        result = P.visualize_general_findings(analysis; io = io)
+        output = String(take!(io))
+        @test occursin("$(uppercase(P.CONFIG.city)) AIRBNB MARKET · 6 listings", output)
+        @test result === nothing
+
+        # 2. happy path: the overview shows the median, the middle half and the median revenue
+        @test occursin("Median price per night   €90  (middle half €65 to €115)", output)
+        @test occursin("Median yearly revenue    €3,500", output)
+        # the six prices 40 to 140: the median is 90, the 25% mark 65 and the 75% mark 115
+
+        # 3. error case: an analysis without the test set is rejected
+        @test_throws FieldError P.visualize_general_findings((df_training = analysis.df_training,); io = IOBuffer())
+        # a NamedTuple without the field df_test gives a FieldError when it is read
+    end
+
     # ------------------------------------------------------------------------------------------
     # pipeline.jl (these use the real data file, so they only pass once all functions work)
     # ------------------------------------------------------------------------------------------
