@@ -291,9 +291,11 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
 
     # 2. the typical price: the median of comparable listings
     println(io, "Typical price for comparable listings   ", format_eur(result.price.median))
+    # the median is the recommended price: half of the comparable listings charge less, half more
 
     # 3. the range: level 0.8 means 8 of 10 comparable listings lie inside it
     shown = round(Int, result.level * 10)
+    # round(Int, 0.8 * 10) gives the whole number 8, so the line can say "8 of 10"
     println(io, "Range ($shown of 10 comparable)   ", format_eur(result.price.lower), " to ", format_eur(result.price.upper))
     println(io, "  ", range_bar(result.price.lower, result.price.upper, result.price.median; current = result.current_price))
     # for a new apartment current_price is nothing, so range_bar draws no ▲
@@ -301,9 +303,11 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
 
     # 4. listed apartments only: how the current price compares with the range, with a coloured message
     if result.group == :listed && !isnothing(result.assessment)
+    # && needs both: a listed apartment and an assessment; a new apartment has assessment = nothing
         status = result.assessment.status
         current = format_eur(result.current_price)
         difference = format_eur(result.assessment.difference)
+        # both amounts are written as euros, e.g. €150 and €10
         if status in (:underpriced, :not_price_problem)
             println(io, "Your price $current is below the range by $difference")
         elseif status in (:overpriced, :unexplained_premium)
@@ -321,6 +325,7 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
             :unexplained_premium => ("guests pay more than the model expects; no action", :default),
         )
         message, color = messages[status]
+        # the Dict gives back a pair (text, colour), and both are unpacked into two names at once
         printstyled(io, message, "\n"; color = color)
         # every status has one sentence and one colour; an unknown status stops with a KeyError
         println(io)
@@ -329,6 +334,7 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
     # 5. revenue: the mean price times the booked nights per year
     if result.group == :listed
         println(io, "Revenue at ", format_eur(result.price.mean), " × your ", round(Int, result.nights), " nights   ", format_eur(result.revenue.estimate))
+        # round(Int, ...) shows the nights as a whole number, 72 instead of 72.0
         println(io, "  range ", format_eur(result.revenue.lower), " to ", format_eur(result.revenue.upper))
     else
         println(io, "Expected revenue (rough estimate)   ", format_eur(result.revenue.estimate))
@@ -350,6 +356,7 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
     # CONFIG.amenity_labels turns the column name :has_AC into the readable "Air conditioning"
 
     step = CONFIG.rating_tips.step
+    # step is how much higher a rating is compared, e.g. 0.1 points on the 1 to 5 scale
     for row in eachrow(result.rating_tips)
         name = replace(String(row.score), "review_scores_" => "")
         println(io, "  Listings rated $step higher for $name charge about $(round(row.pct_per_step; digits = 1))% more.")
@@ -359,6 +366,7 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
 
     # 7. footer: the numbers describe comparable listings, they do not promise anything
     println(io, "Based on comparable listings, not a guarantee.")
+    # the same sentence closes every result screen, for a new and a listed apartment
 
     return nothing
 end
@@ -388,6 +396,7 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, impor
     # 2. header: the city and how many listings the findings are based on
     printstyled(io, "$(uppercase(CONFIG.city)) AIRBNB MARKET · $(nrow(df)) listings\n"; bold = true)
     println(io, "─"^50)
+    # "─"^50 repeats the line character 50 times, the same divider as on the result screen
 
     # 3. overview: the typical price, the middle half of all prices, and the typical yearly revenue
     q1, q3 = quantile(df.price, [0.25, 0.75])
@@ -405,6 +414,7 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, impor
     # 5. model quality: for every model, how much of the differences it explains and its typical error
     for (fit, score) in zip(analysis.fits, analysis.scores)
         explained = round(Int, 100 * score.r2_model_scale)
+        # r2_model_scale is the share of the price differences the model explains, from 0 to 1, so 100 times it is a percentage
         println(io, "Model $(fit.spec.name): explains $explained% of the differences, typical error about ",
                 format_eur(score.median_ae))
     end
@@ -414,6 +424,7 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, impor
 
     # 6. what drives the price: how much of the fit the price model loses without each group of predictors
     fit = get_fit(analysis.fits, :price)
+    # get_fit picks the model named :price out of all fitted models
     if isnothing(importance)
         importance = group_importance(analysis.df_training, analysis.df_test, fit.spec, CONFIG.importance_groups;
                                       reference_levels = CONFIG.reference_levels)
@@ -426,6 +437,7 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, impor
 
     # 7. how close the predictions are: the predicted against the real price of every test listing
     predicted = predict_apartment_performance(fit, analysis.df_test)
+    # the price model predicts every test listing, none of which it saw while it was fitted
     plot_predicted_vs_actual(Float64.(analysis.df_test.price), predicted; io = io)
     println(io)
     # Float64.() turns the CSV column into plain numbers, like in the price plots; the cleaned prices have no empty cells
@@ -436,6 +448,7 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, impor
     println(io, "  The model scores come from one random split; another split gives slightly different values.")
     println(io, "  Predictions are only reliable for apartments like the listings, so every answer is limited.")
     println(io, "  Amenity effects are correlations: an amenity can be common in pricier places without raising the price.")
+    # one line per limit: estimated nights, one random split, limited answers, correlations instead of causes
     println(io)
 
     return nothing
