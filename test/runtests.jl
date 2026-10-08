@@ -1627,7 +1627,7 @@ const P = Project1
         @test terms isa Vector{String}
     end 
 
- @testset "term_effects" begin
+    @testset "term_effects" begin
         # 1. made-up data: AC raises the price by exp(0.1) - 1 = 10.52%
         random_n_generator = P.Random.Xoshiro(42)
         n = 200
