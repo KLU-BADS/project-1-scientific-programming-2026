@@ -346,10 +346,10 @@ how well the models predict, what drives the price, and how close the prediction
 # Arguments
 - `analysis::NamedTuple`:   The result of `run_analysis_pipeline` with `fits`, `scores`, `df_training` and `df_test`.
 - `io::IO`:                 Where the screen is printed (default `stdout`, the terminal).
-
+- `importance`:             Table from `group_importance` if it was computed before; computed here when `nothing` (default).
 Returns `nothing`, the screen is only printed.
 """
-function visualize_general_findings(analysis::NamedTuple; io::IO = stdout)
+function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, importance = nothing)
     # 1. all listings of the city: the training and the test set together
     df = vcat(analysis.df_training, analysis.df_test)
     # vcat puts the rows of the second table under the rows of the first one
@@ -380,6 +380,22 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout)
     # zip walks through the fits and their scores side by side, the scores are in the same order as the fits
     # median_ae is the typical (median) distance between the predicted and the real value, in euros
     println(io)
+
+    # 6. what drives the price: how much of the fit the price model loses without each group of predictors
+    fit = get_fit(analysis.fits, :price)
+    if isnothing(importance)
+        importance = group_importance(analysis.df_training, analysis.df_test, fit.spec, CONFIG.importance_groups;
+                                      reference_levels = CONFIG.reference_levels)
+    end
+    plot_group_importance(importance; io = io)
+    println(io)
+    # group_importance fits the model again without every group, about a second, so main can pass the table in
+
+    # 7. how close the predictions are: the predicted against the real price of every test listing
+    predicted = predict_apartment_performance(fit, analysis.df_test)
+    plot_predicted_vs_actual(Float64.(analysis.df_test.price), predicted; io = io)
+    println(io)
+    # Float64.() turns the CSV column into plain numbers, like in the price plots; the cleaned prices have no empty cells
 
     return nothing
 end
