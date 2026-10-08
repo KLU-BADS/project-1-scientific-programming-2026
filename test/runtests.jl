@@ -1714,6 +1714,7 @@ const P = Project1
         output = String(take!(io))
         # take! empties the IOBuffer and gives back what was printed into it, String turns it into text
         @test occursin("Price per night (EUR)", output)
+        # the histogram title is part of the printed text
         @test result === nothing
         # === checks it is exactly nothing, not just something equal to it
 
@@ -1721,6 +1722,7 @@ const P = Project1
         io = IOBuffer()
         P.plot_price_distribution(df; nbins = 3, io = io)
         @test occursin("Price per night (EUR)", String(take!(io)))
+        # nbins only changes how many bars are drawn, not whether the chart appears
 
         # 3. edge case: a price column read like CSV does, with room for empty cells and one empty cell
         df_csv = DataFrame(price = Union{Missing, Float64}[50.0, 60.0, missing, 80.0, 90.0])
@@ -1746,9 +1748,13 @@ const P = Project1
         result = P.plot_price_by_room_type(df, 2; io = io)
         output = String(take!(io))
         @test occursin("Price by room type", output)
+        # the title of the boxplot
         @test occursin("Entire home/apt", output)
+        # 3 entire homes reach min_count 2, so they get a box
         @test occursin("Private room", output)
+        # 2 private rooms are exactly min_count, so they get a box too
         @test result === nothing
+        # the chart is only printed, so the function gives back nothing
 
         # 2. edge case: a room type below min_count does not appear
         @test !occursin("Shared room", output)
@@ -1758,6 +1764,7 @@ const P = Project1
         io = IOBuffer()
         P.plot_price_by_room_type(df, 10; io = io)
         @test occursin("No room type has at least 10 listings.", String(take!(io)))
+        # the largest room type has only 3 listings, far below 10
 
         # 4. edge case: a price column read like CSV does, with one empty cell
         df_csv = DataFrame(room_type = ["Entire home/apt", "Entire home/apt", "Private room", "Private room"],
@@ -1765,6 +1772,7 @@ const P = Project1
         io = IOBuffer()
         P.plot_price_by_room_type(df_csv, 1; io = io)
         @test occursin("Price by room type", String(take!(io)))
+        # the empty price is skipped, so the boxplot is still drawn
 
         # 5. error case: a table without a room_type column is rejected
         @test_throws ArgumentError P.plot_price_by_room_type(DataFrame(price = [100.0]), 1; io = IOBuffer())
@@ -1780,9 +1788,13 @@ const P = Project1
         result = P.plot_group_importance(importance; io = io)
         output = String(take!(io))
         @test occursin("What drives the price", output)
+        # the title of the bar chart
         @test occursin("location", output)
+        # every group of the table gets its own bar with its name
         @test occursin("size", output)
+        # the second group is drawn as well
         @test result === nothing
+        # the chart is only printed, so the function gives back nothing
 
         # 2. edge case: a group with a negative loss still prints instead of stopping with an error
         importance_negative = DataFrame(group = ["location", "amenities"], r2_loss = [0.12, -0.01])
@@ -1795,6 +1807,7 @@ const P = Project1
         io = IOBuffer()
         P.plot_group_importance(DataFrame(group = String[], r2_loss = Float64[]); io = io)
         @test occursin("No groups of predictors to show.", String(take!(io)))
+        # with no rows there is nothing to draw, so a sentence replaces the chart
 
         # 4. error case: a table without the r2_loss column is rejected
         @test_throws ArgumentError P.plot_group_importance(DataFrame(group = ["location"]); io = IOBuffer())
@@ -1811,17 +1824,23 @@ const P = Project1
         result = P.plot_predicted_vs_actual(actual, predicted; io = io)
         output = String(take!(io))
         @test occursin("Test set", output)
+        # the title of the scatter plot
         @test occursin("actual EUR", output)
+        # the x axis label says which axis holds the real prices
         @test result === nothing
+        # the chart is only printed, so the function gives back nothing
 
         # 2. edge case: perfect predictions, every dot lies on the diagonal, still prints without error
         io = IOBuffer()
         P.plot_predicted_vs_actual(actual, actual; io = io)
         @test occursin("Test set", String(take!(io)))
+        # every dot lies on the diagonal, and UnicodePlots still draws both without an error
 
         # 3. error case: vectors of different length and empty vectors are rejected
         @test_throws DimensionMismatch P.plot_predicted_vs_actual([50.0, 80], [60.0]; io = IOBuffer())
+        # 2 real prices but only 1 prediction, so the pairs cannot be matched
         @test_throws ArgumentError P.plot_predicted_vs_actual(Float64[], Float64[]; io = IOBuffer())
+        # 2 real prices but only 1 prediction, so the pairs cannot be matched
     end
 
     @testset "visualize_results" begin
