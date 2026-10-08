@@ -1961,7 +1961,51 @@ const P = Project1
             # and often means a keyword never matches the amenity texts of this city
         end
     end
- 
+
+    @testset "run_prediction_pipeline" begin
+        # 1. the real pipeline once; a listing from the training data serves as the prepared apartment
+        df = P.run_training_pipeline().df
+        analysis = P.run_analysis_pipeline(df)
+        # cleaned listings, split into training and test set, and every model of CONFIG fitted
+        apartment = analysis.df_training[1:1, :]
+        # [1:1, :] keeps a DataFrame with one row, [1, :] would give a single row object instead
+        # a training listing has every predictor and a district the model knows, like a prepared input
+
+        # 2. happy path: a listed apartment gets its range, its own price and one of the five statuses
+        listed = P.run_prediction_pipeline(analysis, apartment, :listed)
+        @test listed.price.lower <= listed.price.median <= listed.price.upper
+        # the typical price lies inside its own range
+        @test listed.current_price == apartment.price[1]
+        # a listed apartment keeps the price it is rented out for
+        @test listed.nights == apartment.estimated_occupancy_l365d[1]
+        # and its own booked nights, not the typical ones of comparable listings
+        @test listed.revenue.lower < listed.revenue.upper
+        # the revenue range comes from the lower and the upper price, so it is not empty
+        @test listed.assessment.status in (:underpriced, :in_line, :not_price_problem, :overpriced, :unexplained_premium)
+        # assess_listing always gives one of its five statuses
+
+        # 3. happy path: a new apartment gets no current price, no assessment and no revenue range
+        new = P.run_prediction_pipeline(analysis, apartment, :new)
+        @test new.current_price === nothing
+        # a new apartment is not rented out yet, so it has no price to compare
+        @test new.assessment === nothing
+        # without a current price there is nothing to assess
+        @test new.revenue.lower === nothing
+        # its nights are only the typical occupancy, so no revenue range is given
+        @test new.nights > 0
+        # the typical occupancy of comparable listings gives it a positive number of nights
+
+        # 4. edge case: the real bundle prints on the result screen
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        @test occursin("YOUR LISTING", String(take!(io)))
+        # every field visualize_results reads is in the bundle, otherwise printing would stop with an error
+
+        # 5. error case: a group that is not on the menu is rejected
+        @test_throws ArgumentError P.run_prediction_pipeline(analysis, apartment, :rental)
+        # only :listed and :new exist, anything else stops before any work is done
+    end
+
     @testset "run_analysis_pipeline" begin
         # - one fit and one score per entry of P.CONFIG.regression_models
         # - df_training and df_test together have as many rows as the input
