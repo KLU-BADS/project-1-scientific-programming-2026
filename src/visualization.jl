@@ -341,7 +341,8 @@ end
     visualize_general_findings(analysis; io = stdout, importance = nothing)
 
 Print the market findings screen: the size and price level of the city's market, the price charts,
-how well the models predict, what drives the price, and how close the predictions are on the test set.
+how well the models predict, what drives the price, how close the predictions are on the test set,
+and the limits of these findings.
 
 # Arguments
 - `analysis::NamedTuple`:   The result of `run_analysis_pipeline` with `fits`, `scores`, `df_training` and `df_test`.
@@ -402,6 +403,14 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, impor
     plot_predicted_vs_actual(Float64.(analysis.df_test.price), predicted; io = io)
     println(io)
     # Float64.() turns the CSV column into plain numbers, like in the price plots; the cleaned prices have no empty cells
+
+    # 8. footer: what the numbers cannot tell, so nobody reads them as exact
+    println(io, "Limits of these findings")
+    println(io, "  Occupancy is an estimate from reviews, not real bookings.")
+    println(io, "  The model scores come from one random split; another split gives slightly different values.")
+    println(io, "  Predictions are only reliable for apartments like the listings, so every answer is limited.")
+    println(io, "  Amenity effects are correlations: an amenity can be common in pricier places without raising the price.")
+    println(io)
 
     return nothing
 end
