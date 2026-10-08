@@ -1,4 +1,4 @@
-using DataFrames, Printf, UnicodePlots
+using DataFrames, Printf, Statistics, UnicodePlots
 
 """
     format_eur(x; digits = 0)
@@ -116,15 +116,20 @@ Print a histogram of the price per night of all listings in `df`, to show how th
 Returns `nothing`, the chart is only printed.
 """
 function plot_price_distribution(df::DataFrame; nbins::Int = 20, io::IO = stdout)
-    # 1. build the histogram: the prices are sorted into nbins bands of equal width
-    chart = histogram(df.price; nbins = nbins, title = "Price per night (EUR)")
+    # 1. the prices as plain numbers, without empty cells
+    prices = collect(skipmissing(df.price))
+    # CSV stores the column as Union{Missing, Float64}, histogram only accepts plain numbers
+    # skipmissing leaves out empty cells, collect turns the result into a normal vector
+
+    # 2. build the histogram: the prices are sorted into nbins bands of equal width
+    chart = histogram(prices; nbins = nbins, title = "Price per night (EUR)")
     # histogram counts how many listings fall into each price band and draws one bar per band
 
-    # 2. print the chart to io
+    # 3. print the chart to io
     println(io, chart)
     # io is the terminal by default; the tests pass an IOBuffer instead, which collects the text so it can be checked
 
-    # 3. nothing to give back, the chart has only been printed
+    # 4. nothing to give back, the chart has only been printed
     return nothing
 end
 
@@ -159,8 +164,8 @@ function plot_price_by_room_type(df::DataFrame, min_count::Int; io::IO = stdout)
     end
 
     # 4. collect the prices of each kept room type
-    data = [df.price[df.room_type .== rt] for rt in rts]
-    # for every room type rt, take the prices of the rows whose room_type equals rt: one vector of prices per box
+    data = [collect(skipmissing(df.price[df.room_type .== rt])) for rt in rts]
+    # for every room type rt, take its prices without empty cells: one vector of plain numbers per box
 
     # 5. draw one box per room type and print the chart
     chart = boxplot(String.(rts), data; title = "Price by room type", xlabel = "EUR")
@@ -328,6 +333,84 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
 
     # 7. footer: the numbers describe comparable listings, they do not promise anything
     println(io, "Based on comparable listings, not a guarantee.")
+
+    return nothing
+end
+
+"""
+    visualize_general_findings(analysis; io = stdout, importance = nothing)
+
+Print the market findings screen: the size and price level of the city's market, the price charts,
+how well the models predict, what drives the price, how close the predictions are on the test set,
+and the limits of these findings.
+
+# Arguments
+- `analysis::NamedTuple`:   The result of `run_analysis_pipeline` with `fits`, `scores`, `df_training` and `df_test`.
+- `io::IO`:                 Where the screen is printed (default `stdout`, the terminal).
+- `importance`:             Table from `group_importance` if it was computed before; computed here when `nothing` (default).
+
+Returns `nothing`, the screen is only printed.
+
+# Examples
+No example here: the screen needs the models fitted on the real listings, so its use is shown in the tests.
+"""
+function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, importance = nothing)
+    # 1. all listings of the city: the training and the test set together
+    df = vcat(analysis.df_training, analysis.df_test)
+    # vcat puts the rows of the second table under the rows of the first one
+
+    # 2. header: the city and how many listings the findings are based on
+    printstyled(io, "$(uppercase(CONFIG.city)) AIRBNB MARKET · $(nrow(df)) listings\n"; bold = true)
+    println(io, "─"^50)
+
+    # 3. overview: the typical price, the middle half of all prices, and the typical yearly revenue
+    q1, q3 = quantile(df.price, [0.25, 0.75])
+    println(io, "Median price per night   ", format_eur(median(df.price)),
+            "  (middle half ", format_eur(q1), " to ", format_eur(q3), ")")
+    println(io, "Median yearly revenue    ", format_eur(median(df.estimated_revenue)))
+    # quantile at 0.25 and 0.75 gives the two prices between which the middle 50% of all listings lie
+    println(io)
+    # 4. the price charts: how the prices are spread, and the price per room type
+    plot_price_distribution(df; io = io)
+    plot_price_by_room_type(df, CONFIG.min_room_type_count; io = io)
+    println(io)
+    # room types with fewer listings than CONFIG.min_room_type_count get no box of their own
+
+    # 5. model quality: for every model, how much of the differences it explains and its typical error
+    for (fit, score) in zip(analysis.fits, analysis.scores)
+        explained = round(Int, 100 * score.r2_model_scale)
+        println(io, "Model $(fit.spec.name): explains $explained% of the differences, typical error about ",
+                format_eur(score.median_ae))
+    end
+    # zip walks through the fits and their scores side by side, the scores are in the same order as the fits
+    # median_ae is the typical (median) distance between the predicted and the real value, in euros
+    println(io)
+
+    # 6. what drives the price: how much of the fit the price model loses without each group of predictors
+    fit = get_fit(analysis.fits, :price)
+    if isnothing(importance)
+        importance = group_importance(analysis.df_training, analysis.df_test, fit.spec, CONFIG.importance_groups;
+                                      reference_levels = CONFIG.reference_levels)
+    end
+    plot_group_importance(importance; io = io)
+    println(io)
+    # group_importance fits the model again without every group, about a second, so main can pass the table in
+
+    # TODO (#187): the detail lines with term_effects and rating_effects come here
+
+    # 7. how close the predictions are: the predicted against the real price of every test listing
+    predicted = predict_apartment_performance(fit, analysis.df_test)
+    plot_predicted_vs_actual(Float64.(analysis.df_test.price), predicted; io = io)
+    println(io)
+    # Float64.() turns the CSV column into plain numbers, like in the price plots; the cleaned prices have no empty cells
+
+    # 8. footer: what the numbers cannot tell, so nobody reads them as exact
+    println(io, "Limits of these findings")
+    println(io, "  Occupancy is an estimate from reviews, not real bookings.")
+    println(io, "  The model scores come from one random split; another split gives slightly different values.")
+    println(io, "  Predictions are only reliable for apartments like the listings, so every answer is limited.")
+    println(io, "  Amenity effects are correlations: an amenity can be common in pricier places without raising the price.")
+    println(io)
 
     return nothing
 end

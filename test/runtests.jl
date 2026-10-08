@@ -1675,7 +1675,14 @@ const P = Project1
         P.plot_price_distribution(df; nbins = 3, io = io)
         @test occursin("Price per night (EUR)", String(take!(io)))
 
-        # 3. error case: a table without a price column is rejected
+        # 3. edge case: a price column read like CSV does, with room for empty cells and one empty cell
+        df_csv = DataFrame(price = Union{Missing, Float64}[50.0, 60.0, missing, 80.0, 90.0])
+        io = IOBuffer()
+        P.plot_price_distribution(df_csv; io = io)
+        @test occursin("Price per night (EUR)", String(take!(io)))
+        # the empty cell is skipped, the four prices are drawn
+
+        # 4. error case: a table without a price column is rejected
         @test_throws ArgumentError P.plot_price_distribution(DataFrame(x = [1, 2]); io = IOBuffer())
         # DataFrames throws ArgumentError when df.price does not exist
     end
@@ -1705,7 +1712,14 @@ const P = Project1
         P.plot_price_by_room_type(df, 10; io = io)
         @test occursin("No room type has at least 10 listings.", String(take!(io)))
 
-        # 4. error case: a table without a room_type column is rejected
+        # 4. edge case: a price column read like CSV does, with one empty cell
+        df_csv = DataFrame(room_type = ["Entire home/apt", "Entire home/apt", "Private room", "Private room"],
+                           price = Union{Missing, Float64}[120.0, missing, 50.0, 70.0])
+        io = IOBuffer()
+        P.plot_price_by_room_type(df_csv, 1; io = io)
+        @test occursin("Price by room type", String(take!(io)))
+
+        # 5. error case: a table without a room_type column is rejected
         @test_throws ArgumentError P.plot_price_by_room_type(DataFrame(price = [100.0]), 1; io = IOBuffer())
         # groupby throws ArgumentError when the column does not exist
     end
@@ -1872,6 +1886,94 @@ const P = Project1
             @test occursin(message, output)
         end
         # @testset ... for runs the same two tests once for every row of the list, each as its own small test set
+    end
+
+    @testset "visualize_general_findings" begin
+        # a small made-up market: 4 training and 2 test listings whose price grows with the number of guests
+        df_training = DataFrame(price = [40.0, 60.0, 80.0, 100.0], estimated_revenue = [1000.0, 2000.0, 3000.0, 4000.0],
+                                room_type = ["Entire home/apt", "Entire home/apt", "Private room", "Private room"],
+                                accommodates = [1, 2, 3, 4])
+        df_test = DataFrame(price = [120.0, 140.0], estimated_revenue = [5000.0, 6000.0],
+                            room_type = ["Entire home/apt", "Private room"], accommodates = [5, 6])
+        # the price is 20 per guest plus 20, so a model with the number of guests as its only predictor fits well
+
+        spec = (name = :price, target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:accommodates])
+        fit = P.regression_city(df_training, spec)
+        # the spec is named :price, because the screen looks up the price model by that name with get_fit
+
+        analysis = (df_training = df_training, df_test = df_test, fits = [fit], scores = [P.evaluate_regression(fit, df_test)])
+        # the same four fields run_analysis_pipeline gives back, built by hand so every number is known
+
+        importance = DataFrame(group = ["Size", "Location"], r2_loss = [0.2, 0.1])
+        # a made-up importance table is passed in, because group_importance needs the full set of predictors
+
+        # 1. happy path: the header counts all six listings and names the city from CONFIG
+        io = IOBuffer()
+        result = P.visualize_general_findings(analysis; io = io, importance = importance)
+        output = String(take!(io))
+        # the whole screen is printed into the IOBuffer and read back as one text
+        @test occursin("$(uppercase(P.CONFIG.city)) AIRBNB MARKET · 6 listings", output)
+        # 4 training plus 2 test listings, the city comes from CONFIG and is written in capitals
+        @test result === nothing
+        # the screen only prints, so it gives back nothing
+
+        # 2. happy path: the overview shows the median, the middle half and the median revenue
+        @test occursin("Median price per night   €90  (middle half €65 to €115)", output)
+        # the six prices 40 to 140: the median is 90, the 25% mark 65 and the 75% mark 115
+        @test occursin("Median yearly revenue    €3,500", output)
+        # the median of the six revenues 1000 to 6000 lies between 3000 and 4000
+
+        # 3. error case: an analysis without the test set is rejected
+        @test_throws FieldError P.visualize_general_findings((df_training = analysis.df_training,); io = IOBuffer())
+        # a NamedTuple without the field df_test gives a FieldError as soon as the screen reads it
+
+        # 4. edge case: with only six listings no room type reaches the minimum count, so a message replaces the boxplot
+        @test occursin("Price per night (EUR)", output)
+        # the histogram is drawn for any number of listings
+        @test occursin("No room type has at least $(P.CONFIG.min_room_type_count) listings.", output)
+        # 3 listings per room type are far below CONFIG.min_room_type_count, so plot_price_by_room_type prints its sentence
+
+        # 5. happy path: the model line, the importance chart with every group and the predicted against actual plot
+        @test occursin("Model price: explains", output)
+        # one quality line for the one made-up model, named after its spec
+        @test occursin("What drives the price", output)
+        # the title of the importance bar chart
+        @test occursin("Size", output) && occursin("Location", output)
+        # every group of the importance table that was passed in gets a bar
+        @test occursin("Test set", output)
+        # the title of the scatter plot of the predicted against the real test prices
+
+        # 6. happy path: on the real analysis every model gets a quality line, and the importance is computed here
+        real_analysis = P.run_analysis_pipeline(P.run_training_pipeline().df)
+        # the real pipeline once: cleaned Athens listings, split, and every model of CONFIG fitted
+        io = IOBuffer()
+        P.visualize_general_findings(real_analysis; io = io)
+        real_output = String(take!(io))
+        # no importance table is passed, so the screen computes it with group_importance itself
+        for spec in P.CONFIG.regression_models
+            @test occursin("Model $(spec.name): explains", real_output)
+        end
+        # every model of CONFIG.regression_models has its own quality line
+        @test occursin("Price by room type", real_output)
+        # the real data has room types with enough listings, so the boxplot is drawn this time
+        @test occursin("What drives the price", real_output)
+        # the importance chart is also drawn when the table is computed on the screen
+        for (name, columns) in P.CONFIG.importance_groups
+            @test occursin(name, real_output)
+        end
+        # every group of CONFIG.importance_groups has a bar in the real importance chart
+
+        # 7. happy path: the footer names the four limits of the findings
+        @test occursin("Limits of these findings", output)
+        # the footer starts with its own title line after the last plot
+        @test occursin("Occupancy is an estimate from reviews", output)
+        # limit 1: the nights are estimated, so every revenue number is an estimate too
+        @test occursin("one random split", output)
+        # limit 2: the model scores depend on which listings landed in the test set
+        @test occursin("every answer is limited", output)
+        # limit 3: the input is restricted because extreme answers break the predictions
+        @test occursin("Amenity effects are correlations", output)
+        # limit 4: an amenity effect is not a promise that adding it raises the price
     end
 
     # ------------------------------------------------------------------------------------------
