@@ -1188,3 +1188,38 @@ function selection_to_dummies(selected_dummies::AbstractVector{Symbol}, dummy_co
     end
     return dummies
 end
+
+"""
+    derive_district(latitude, longitude, df_training, distance_rule) -> String
+
+Find the district of a location: the district of the training listing nearest to it.
+The user only enters coordinates, but the model needs a district, so it is taken from the nearest listing.
+
+# Arguments
+- `latitude::Real`:             latitude of the user's apartment.
+- `longitude::Real`:            longitude of the user's apartment.
+- `df_training::DataFrame`:     training data with the columns `latitude`, `longitude` and `district`
+                                (districts already grouped, so the result is a district the model knows).
+- `distance_rule::NamedTuple`:  the distance rule from the config, e.g. `CONFIG.distance_rule`.
+
+Returns the district as a `String`. `df_training` is not changed.
+
+# Examples
+```jldoctest
+julia> df = DataFrame(latitude = [37.97, 37.99], longitude = [23.72, 23.74], district = ["Plaka", "Kolonaki"]);
+
+julia> rule = (target = :proximity_city_center, source_columns = (latitude = :latitude, longitude = :longitude), delete = false);
+
+julia> Project1.derive_district(37.971, 23.721, df, rule)
+"Plaka"
+```
+"""
+function derive_district(latitude::Real, longitude::Real, df_training::DataFrame, distance_rule::NamedTuple)
+    # create temporary data frame only with location data (use column names for source to ensure changing column names only have to be adapted in CONFIG)
+    source_column_latitude = distance_rule.source_columns.latitude
+    source_column_longitude = distance_rule.source_columns.longitude
+    df_location = df_training[:, [source_column_latitude, source_column_longitude, :district]]
+    # calculate the distance of every listed apartment to the users apartment to find closest apartment and copy the district as the user apartments district 
+    calculate_distance!(df_location, merge(distance_rule, (target = :distance_to_user_apartment, delete = false)), (latitude = latitude, longitude = longitude))
+    return String(df_location.district[argmin(df_location.distance_to_user_apartment)])
+end

@@ -1048,7 +1048,7 @@ const P = Project1
         @test isempty(P.get_amenity_columns([(source = :is_superhost, target = :is_superhost, keywords = ["t"], delete = false)]))
     end
 
-        @testset "selection_to_dummies" begin
+    @testset "selection_to_dummies" begin
         columns = [:has_AC, :has_tv, :has_pool]
 
         # 1. selected columns get 1, all others 0
@@ -1074,6 +1074,33 @@ const P = Project1
         # 7. lists that are not Symbols do not match the signature
         @test_throws MethodError P.selection_to_dummies(["TV"], columns)
         @test_throws MethodError P.selection_to_dummies([], columns)     # [] is a Vector{Any}
+    end
+
+    @testset "derive_district" begin
+        # three made-up listings in three districts
+        df = DataFrame(latitude  = [37.97, 37.99, 38.01],
+                       longitude = [23.72, 23.74, 23.70],
+                       district  = ["A", "B", "C"])
+        rule = (target = :proximity_city_center, source_columns = (latitude = :latitude, longitude = :longitude), delete = true)
+
+        # 1. a point exactly on a listing gets that listing's district
+        @test P.derive_district(37.99, 23.74, df, rule) == "B"
+
+        # 2. a point close to a listing gets that listing's district
+        @test P.derive_district(37.971, 23.721, df, rule) == "A"
+        @test P.derive_district(38.005, 23.705, df, rule) == "C"
+
+        # 3. the result is a plain String
+        @test P.derive_district(37.99, 23.74, df, rule) isa String
+
+        # 4. the training data is not changed: no new column, coordinates still there
+        #    (the rule has delete = true on purpose; the function must override it)
+        @test names(df) == ["latitude", "longitude", "district"]
+
+        # 5. the coordinate columns are taken from the rule, not hard-coded
+        df_renamed = DataFrame(lat = [37.97, 37.99], lon = [23.72, 23.74], district = ["A", "B"])
+        rule_renamed = (target = :proximity_city_center, source_columns = (latitude = :lat, longitude = :lon), delete = false)
+        @test P.derive_district(37.99, 23.74, df_renamed, rule_renamed) == "B"
     end
 
     # ------------------------------------------------------------------------------------------
