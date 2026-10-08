@@ -220,6 +220,10 @@ with the diagonal where both are equal.
 - `predicted::AbstractVector`:  Prices the model predicts for the same listings, in the same order.
 - `io::IO`:                     Where the chart is printed (default `stdout`, the terminal).
 
+# Throws
+- `DimensionMismatch`: if `actual` and `predicted` have a different number of values.
+- `ArgumentError`: if both are empty.
+
 Returns `nothing`, the chart is only printed.
 """
 function plot_predicted_vs_actual(actual::AbstractVector, predicted::AbstractVector; io::IO = stdout)
@@ -255,6 +259,10 @@ the assessment of its current price, the expected revenue, and tips to raise the
                         (`estimate`, `lower`, `upper`), `current_price`, `assessment` (`status`, `difference`),
                         `district`, `room_type`, `tips` and `rating_tips`.
 - `io::IO`:             Where the screen is printed (default `stdout`, the terminal).
+
+# Throws
+- `KeyError`: if `assessment.status` is not one of the five known statuses, or a tip names an amenity
+  that has no label in `CONFIG.amenity_labels`.
 
 Returns `nothing`, the screen is only printed.
 """
