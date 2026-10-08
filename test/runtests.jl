@@ -1962,7 +1962,7 @@ const P = Project1
         end
     end
 
-     @testset "run_prediction_pipeline" begin
+    @testset "run_prediction_pipeline" begin
         # 1. the real pipeline once; a listing from the training data serves as the prepared apartment
         df = P.run_training_pipeline().df
         analysis = P.run_analysis_pipeline(df)
