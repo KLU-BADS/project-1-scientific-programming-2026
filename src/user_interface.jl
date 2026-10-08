@@ -53,6 +53,13 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
                     result = run_prediction_pipeline(analysis, df, choice)
                     # the price range, revenue, assessment and tips of this one apartment
                     visualize_results(result; io = io_out)
+                    # offer to save the result screen as a text file
+                    save = ask_yes_no("Save this result to a file? (y/n) "; io_in = io_in, io_out = io_out)
+                    if save == true
+                        file = save_report(result, "hostwise_result.txt")
+                        println(io_out, "Saved to ", file)
+                    end
+                    # save == true also handles nothing (q), which simply saves nothing
                 catch exception
                     # a wrong answer stops only this prediction; any other error is a bug, so it stops the program
                     exception isa ArgumentError || rethrow()

@@ -372,6 +372,31 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
 end
 
 """
+    save_report(result, path) -> String
+
+Write the result screen of one apartment to a text file, so the host can keep the price, the range and the revenue.
+
+# Arguments
+- `result::NamedTuple`:     the result of `run_prediction_pipeline`.
+- `path::AbstractString`:   where the file is written; an existing file is replaced. The folder must exist.
+
+# Throws
+- `SystemError`   if the file cannot be written, e.g. the folder does not exist.
+
+Returns the absolute path of the written file.
+"""
+function save_report(result::NamedTuple, path::AbstractString)
+    # 1. open the file for writing and print the same screen into it
+    open(path, "w") do io
+        visualize_results(result; io = io)
+    end
+    # visualize_results prints to any io, so the file gets exactly the text of the terminal screen;
+    # do ... end closes the file again, also when an error happens
+    # 2. give back the full path, so the user can be told where the file is
+    return abspath(path)
+end
+
+"""
     visualize_general_findings(analysis; io = stdout, importance = nothing)
 
 Print the market findings screen: the size and price level of the city's market, the price charts,
