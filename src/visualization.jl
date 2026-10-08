@@ -56,6 +56,9 @@ If the current price `current` is given, it is marked with `▲`, and the bar is
 - `width`:      Number of characters between the brackets (default 30).
 - `current`:    Current price of a listed apartment, marked with `▲` (default `nothing`).
 
+# Throws
+- `ArgumentError`: if `lower` is larger than `upper`, or `width` is smaller than 1.
+
 Returns the bar as a `String`, with both ends written as euro amounts.
 
 # Examples
