@@ -632,6 +632,37 @@ function significant_terms(fit::NamedTuple; alpha::Real = 0.05)
 end
 
 """
+    superhost_tip(fit, is_superhost; alpha = 0.05) -> Union{Float64, Nothing}
+
+The expected price change in percent from becoming a Superhost, for a host who is not one yet.
+
+# Arguments
+- `fit::NamedTuple`:        a fit from `regression_city`, e.g. the `:price` model.
+- `is_superhost::Integer`:  1 if the host is already a Superhost, 0 if not.
+- `alpha::Real`:            the significance level (default 0.05, `CONFIG.significance_level`).
+
+Returns the effect in percent (from `term_effects`), or `nothing` if the host is already a Superhost,
+the model has no Superhost term, the effect is not significant or it does not raise the price.
+"""
+function superhost_tip(fit::NamedTuple, is_superhost::Integer; alpha::Real = 0.05)
+    # 1. a host who is already a Superhost gets no tip
+    is_superhost == 1 && return nothing
+
+    # 2. the row of the Superhost term in the effect table
+    effects = term_effects(fit)
+    row = findfirst(==("is_superhost"), effects.term)
+    # GLM names a 0/1 column like the column itself; findfirst gives nothing if the term is missing
+    isnothing(row) && return nothing
+
+    # 3. only a significant effect that raises the price is a tip
+    effects.pvalue[row] < alpha || return nothing
+    effects.pct[row] > 0 || return nothing
+
+    # 4. the effect in percent
+    return effects.pct[row]
+end
+
+"""
     amenity_effects(fit::NamedTuple, df_row::DataFrame, amenities::AbstractVector{Symbol};
                     alpha::Real = 0.05, min_effect_pct::Real = 1.0) -> DataFrame
 
