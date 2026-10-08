@@ -1634,6 +1634,7 @@ const P = Project1
     @testset "format_eur" begin
         # 1. happy path: whole euros get a comma between every three digits
         @test P.format_eur(7272) == "€7,272"
+        # 7272 has four digits, so one comma goes before the last three
         @test P.format_eur(1234567.8) == "€1,234,568"
         # 1234567.8 is rounded to 1234568 first, then two commas are added
         @test P.format_eur(140) == "€140"
@@ -1641,11 +1642,13 @@ const P = Project1
 
         # 2. happy path: decimals are kept when digits is given
         @test P.format_eur(7.5; digits = 2) == "€7.50"
+        # digits = 2 always shows two decimals, so 7.5 gets a trailing 0
         @test P.format_eur(1234.5; digits = 2) == "€1,234.50"
         # the comma only goes into the whole part, the decimals stay as they are
 
         # 3. edge case: zero and a negative amount
         @test P.format_eur(0) == "€0"
+        # zero is a normal amount, written without a comma
         @test P.format_eur(-1234) == "€-1,234"
         # no comma after the minus sign, because the pattern needs a digit before the comma
 
@@ -1661,10 +1664,13 @@ const P = Project1
 
         # 2. happy path: the marker sits at the ends when the price is at the lower or upper end
         @test P.range_bar(60, 140, 60; width = 9) == "€60 [●========] €140"
+        # 60 is the lower end, so ● takes the first place
         @test P.range_bar(60, 140, 140; width = 9) == "€60 [========●] €140"
+        # 140 is the upper end, so ● takes the last place
 
         # 3. happy path: a current price inside the range gets ▲ and the bar keeps its ends
         @test P.range_bar(60, 140, 100; width = 9, current = 80) == "€60 [==▲=●====] €140"
+        # 80 is a quarter of the way from 60 to 140, so ▲ lands on place 3 while ● stays on place 5
 
         # 4. edge case: a current price above the range stretches the bar up to that price
         @test P.range_bar(60, 140, 100; width = 9, current = 180) == "€60 [===●==  ▲] €180"
@@ -1693,7 +1699,9 @@ const P = Project1
 
         # 10. error case: an upside down range and a bar without places are rejected
         @test_throws ArgumentError P.range_bar(140, 60, 100)
+        # lower 140 is larger than upper 60, so there is no range to draw
         @test_throws ArgumentError P.range_bar(60, 140, 100; width = 0)
+        # width 0 leaves no place for any marker
     end
 
     @testset "plot_price_distribution" begin
