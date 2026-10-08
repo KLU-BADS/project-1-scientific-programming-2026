@@ -395,6 +395,8 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, impor
     println(io)
     # group_importance fits the model again without every group, about a second, so main can pass the table in
 
+    # TODO (#187): the detail lines with term_effects and rating_effects come here
+
     # 7. how close the predictions are: the predicted against the real price of every test listing
     predicted = predict_apartment_performance(fit, analysis.df_test)
     plot_predicted_vs_actual(Float64.(analysis.df_test.price), predicted; io = io)
