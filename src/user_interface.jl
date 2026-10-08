@@ -1,17 +1,46 @@
 using REPL.TerminalMenus
 
 """
-    gui()
+    gui(analysis; io_in = stdin, io_out = stdout)
 
-User interface in REPL allowing a user to view analysis results and enter information about his apartment
+Run the terminal menu of the program until the user chooses Exit: show the market findings,
+price a new apartment or check a listed one.
 
 # Arguments
-- `config.Promts::NamedTuple`:  promts for the menu
+- `analysis::NamedTuple`:   The result of `run_analysis_pipeline` together with `fitted` from `run_training_pipeline`.
+- `io_in::IO`:              Where the typed answers are read from (default `stdin`, the keyboard).
+- `io_out::IO`:             Where the screens are printed (default `stdout`, the terminal).
 
-Returns 
+# Throws
+- Every error except an `ArgumentError` from the input is passed on unchanged.
+
+Returns `nothing` once the user chooses Exit.
+
+# Examples
+No example here: the menus need a real keyboard, so gui is tested by hand in the terminal.
 """
-function gui()
+function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
+    # the group importance fits the price model once per group, so it is computed on the first visit only
+    importance = nothing
 
+    while true
+        # 1. the main menu; ask_choice adds Exit itself and gives back nothing for it
+        choice = ask_choice("What would you like to do?", ["Market findings" => :findings, "Price a new apartment" => :new, "Check my listed apartment" => :listed])
+        isnothing(choice) && return nothing
+
+        # 2. the market findings, with the importance table computed once and reused on every later visit
+        if choice == :findings
+            if isnothing(importance)
+                fit = get_fit(analysis.fits, :price)
+                importance = group_importance(analysis.df_training, analysis.df_test, fit.spec, CONFIG.importance_groups; reference_levels = CONFIG.reference_levels)
+            end
+            visualize_general_findings(analysis; io = io_out, importance = importance)
+        end
+
+        # 4. wait, so the screen stays visible until the user has read it
+        println(io_out, "Press Enter to return to the menu.")
+        readline(io_in)
+    end
 end
 
 
