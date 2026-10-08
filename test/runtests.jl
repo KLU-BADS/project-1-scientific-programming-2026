@@ -1627,7 +1627,7 @@ const P = Project1
         @test terms isa Vector{String}
     end 
 
-       @testset "rating_effects" begin
+    @testset "rating_effects" begin
         # 1. made-up data: cleanliness raises the price (coefficient 0.122), accuracy lowers it (-0.10)
         random_n_generator = P.Random.Xoshiro(42)
         n = 200
