@@ -77,14 +77,47 @@ end
 
 
 """
-    run_inference_pipeline() -> DataFrame
+    run_inference_pipeline(df_input, fitted) -> DataFrame
 
-Run data pre-processing pipeline for the user input about a sigle apartment for the regression model to run a prediction.
+Prepare the user's apartment for the price model: apply the same pre-processing steps as `run_training_pipeline`,
+with the values learned on the training data, so the row looks exactly like a training row.
 
-Returns processed user input as DataFrame `df`.
+The steps, in the order of the training pipeline:
+1. cap the sizes with the training caps of the room type (`cap_values!`);
+2. calculate every ratio whose columns are in the input (`calculate_ratio!`); e.g. the occupancy rate only for listed apartments;
+3. calculate the distance to the city center (`calculate_distance!`);
+4. group a district that was rare in training as `"_other"` (`group_rare_categories!`);
+5. calculate the centred squares with the training centres (`calculate_square!`);
+6. check that every predictor of the `:price` model is there.
 
-<!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
+# Arguments
+- `df_input::DataFrame`:    the user's answers as a one-row table, e.g. from `import_user_input`.
+- `fitted::NamedTuple`:     the values learned on the training data, `fitted` of `run_training_pipeline`:
+                            `caps`, `kept_districts` and `square_centers`.
+
+# Throws
+- `ArgumentError`   if a predictor of the `:price` model is missing after all steps; the message names it.
+- `ArgumentError`   if there is no cap for the room type (a room type that was not in the training data).
+
+Returns a new prepared table; `df_input` is not changed.
 """
-function run_inference_pipeline()
-
+function run_inference_pipeline(df_input::DataFrame, fitted::NamedTuple)
+    df_inference = copy(df_input)
+    cap_values!(df_inference, fitted.caps, CONFIG.cap_rules)
+    for rule in CONFIG.ratio_rules
+        if hasproperty(df_inference, rule.numerator) 
+            if rule.denominator isa Real || hasproperty(df_inference, rule.denominator)
+                calculate_ratio!(df_inference, rule)
+            end
+        end
+    end
+    calculate_distance!(df_inference, CONFIG.distance_rule, CONFIG.cities[CONFIG.city].center)
+    group_rare_categories!(df_inference, CONFIG.category_rule, fitted.kept_districts)
+    for rule in CONFIG.square_rules
+        calculate_square!(df_inference, rule, fitted.square_centers[rule.source])
+    end
+    spec = only(filter(m -> m.name == :price, CONFIG.regression_models))
+    missing_cols = setdiff(spec.predictors, propertynames(df_inference))
+    isempty(missing_cols) || throw(ArgumentError("input is missing: $(join(missing_cols, ", "))"))
+    return df_inference
 end

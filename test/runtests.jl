@@ -2010,10 +2010,66 @@ const P = Project1
     end
  
     @testset "run_inference_pipeline" begin
-        # fill in once its argument is decided:
-        # - one valid apartment gives one row with every predictor of P.CONFIG.regression_models
-        # - 0 bathrooms or bedrooms throws an error with a clear message
-        @test_broken false
+        # 1. a complete answer row: placed exactly on the city center, more guests than the cap allows
+        center = P.CONFIG.cities[P.CONFIG.city].center
+        function answer_row(; district = "Plaka", room_type = "Entire home/apt")
+            row = DataFrame(room_type = [room_type], district = [district],
+                            accommodates = [10], bedrooms = [2], beds = [3], bathrooms = [1.0],
+                            minimum_nights = [2], is_superhost = [1], review_scores_rating = [4.8],
+                            latitude = [center.latitude], longitude = [center.longitude])
+            for amenity in P.AMENITIES
+                row[!, amenity] = [0]
+            end
+            return row
+        end
+        # 2. made-up training values: caps for one room type, one kept district, two square centres
+        fitted = (caps = Dict(("Entire home/apt", :accommodates) => 8.0, ("Entire home/apt", :bedrooms) => 4.0,
+                              ("Entire home/apt", :beds) => 6.0,         ("Entire home/apt", :bathrooms) => 3.0),
+                  kept_districts = ["Plaka"],
+                  square_centers = Dict(:accommodates => 4.0, :review_scores_rating => 4.7))
+        price_predictors = only(filter(m -> m.name == :price, P.CONFIG.regression_models)).predictors
+
+        df_input = answer_row()
+        result = P.run_inference_pipeline(df_input, fitted)
+
+        # 3. every predictor of the price model is there
+        @test issubset(price_predictors, propertynames(result))
+
+        # 4. the size above the training cap is lowered to the cap (10 guests -> 8)
+        @test result.accommodates[1] == 8
+
+        # 5. a point on the city center has distance 0
+        @test result.proximity_city_center[1] ≈ 0.0 atol = 1e-9
+
+        # 6. the squares use the training centres and the capped value: (8 - 4)^2 and (4.8 - 4.7)^2
+        @test result.accommodates_sq[1] == 16.0
+        @test result.rating_sq[1] ≈ 0.01
+
+        # 7. a kept district stays, an unknown district becomes "_other"
+        @test result.district[1] == "Plaka"
+        @test P.run_inference_pipeline(answer_row(district = "Nowhere"), fitted).district[1] == P.CONFIG.category_rule.other_label
+
+        # 8. the input table is not changed
+        @test df_input.accommodates[1] == 10
+        @test !hasproperty(df_input, :proximity_city_center)
+
+        # 9. ratios: a new apartment has no booked nights, so no occupancy rate;
+        #    a listed one gets nights / 365, but no ratio that needs availability_365
+        @test !hasproperty(result, :occupancy_rate)
+        listed = answer_row()
+        listed[!, :estimated_occupancy_l365d] = [73]
+        result_listed = P.run_inference_pipeline(listed, fitted)
+        @test result_listed.occupancy_rate[1] ≈ 0.2
+        @test !hasproperty(result_listed, :ratio_occupancy_availability)
+
+        # 10. a missing predictor is refused, and the message names it
+        incomplete = select(answer_row(), Not(:has_AC))
+        @test_throws ArgumentError P.run_inference_pipeline(incomplete, fitted)
+        err = try P.run_inference_pipeline(incomplete, fitted) catch e; e end
+        @test occursin("has_AC", err.msg)
+
+        # 11. a room type without training caps is refused (by cap_values!)
+        @test_throws ArgumentError P.run_inference_pipeline(answer_row(room_type = "Hotel room"), fitted)
     end
  
     # ------------------------------------------------------------------------------------------
