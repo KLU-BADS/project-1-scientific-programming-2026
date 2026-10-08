@@ -630,3 +630,45 @@ function significant_terms(fit::NamedTuple; alpha::Real = 0.05)
     return coefficient_table.rownms[is_significant]
 
 end
+
+"""
+    term_effects(fit::NamedTuple) -> DataFrame
+
+The effect and p-value of every term of a fitted model, except the intercept.
+
+In a log model the effect is given in percent, `100 * (exp(b) - 1)` for coefficient `b`,
+so all terms read the same way. Otherwise it is the coefficient itself.
+The names are written as GLM writes them, e.g. `"has_AC"` or `"room_type: Private room"`.
+
+# Arguments
+- `fit::NamedTuple`: a fit from `regression_city`, with the fields `spec` and `model`.
+
+Returns a `DataFrame` with the columns `term` (String), `pct` (percent, or the coefficient
+when `fit.spec.log_scale` is false) and `pvalue`, one row per term in the model's order.
+
+# Examples
+```julia
+fit = regression_city(df_training, spec)
+term_effects(fit)
+```
+"""
+function term_effects(fit::NamedTuple)
+
+    # 1. the coefficient table: the term names, the coefficients and the p-values (in the same order)
+    coefficient_table = coeftable(fit.model)
+    term_names = coefficient_table.rownms
+    coefficient = coef(fit.model)
+    p_values = coefficient_table.cols[coefficient_table.pvalcol]
+
+    # 2. one row per term except the intercept: the effect in percent (log model) or the coefficient, and its p-value
+    effects = DataFrame(term = String[], pct = Float64[], pvalue = Float64[])
+    for i in eachindex(term_names)
+        term_names[i] == "(Intercept)" && continue
+        b = coefficient[i]
+        pct = fit.spec.log_scale ? 100 * (exp(b) - 1) : b
+        push!(effects, (term = term_names[i], pct = pct, pvalue = p_values[i]))
+    end
+
+    # 3. give back the table
+    return effects
+end
