@@ -66,6 +66,11 @@ Returns the bundle for `visualize_results`: `group`, `level`, `price` (`median`,
 `nights`, `revenue` (`estimate`, `lower`, `upper`), `current_price`, `assessment` (`status`, `difference`),
 `district`, `room_type`, `tips` and `rating_tips`.
 
+The tips come from `amenity_effects` on the `:price` model: the amenities of `CONFIG.actionable_amenities`
+the apartment does not have yet, with a significant effect of at least `CONFIG.min_effect_pct` percent.
+The rating tips come from `rating_effects` on the `:price_explain` model, the only model with the rating
+sub-scores, for the scores in `CONFIG.rating_tips`.
+
 # Examples
 No example here: the function needs the models fitted on the real listings, so its use is shown in the tests.
 """
