@@ -72,6 +72,36 @@ const P = Project1
         # 5. keys that are not Symbols do not match the signature
         @test_throws MethodError P.import_user_input(Dict("bedrooms" => 2))
     end
+
+    @testset "parse_geocode_response" begin
+        # 1. one match: numbers and the address name are read
+        one_match = """[{"lat": "37.97", "lon": "23.72", "display_name": "Ermou 10, Athens"}]"""
+        result = P.parse_geocode_response(one_match)
+        @test result.latitude == 37.97
+        @test result.longitude == 23.72
+        @test result.display_name == "Ermou 10, Athens"
+        @test result.latitude isa Float64
+
+        # 2. several matches: the first one is taken
+        two_matches = """[{"lat": "37.97", "lon": "23.72", "display_name": "first"},
+                          {"lat": "38.00", "lon": "23.80", "display_name": "second"}]"""
+        @test P.parse_geocode_response(two_matches).display_name == "first"
+
+        # 3. an empty list (no address found) gives nothing
+        @test isnothing(P.parse_geocode_response("[]"))
+
+        # 4. text that is not JSON is an error
+        @test_throws Exception P.parse_geocode_response("this is not json")
+    end
+
+    @testset "geocode_address" begin
+        # The real search needs the internet and is tested by hand with a known address.
+        # Here: a server that cannot be reached must give nothing, not an error.
+        unreachable = (url = "http://127.0.0.1:1/search", user_agent = "Project1 test",
+                       country_code = "gr", timeout = 2)
+        bounds = (lat_min = 37.95, lat_max = 38.03, lon_min = 23.70, lon_max = 23.78)
+        @test isnothing(P.geocode_address("Ermou 10", "Athens", bounds; config = unreachable))
+    end
  
     # ------------------------------------------------------------------------------------------
     # data_pre_processing.jl
@@ -2641,5 +2671,30 @@ const P = Project1
         @test P.ask_numbers!(answers, NamedTuple[], df, plausibility; io_in = IOBuffer(""), io_out = IOBuffer())
         @test length(answers) == 1
     end
+    
+    @testset "ask_text" begin
+        # 1. the entered text is returned
+        @test P.ask_text("Address: "; io_in = IOBuffer("Ermou 10\n"), io_out = IOBuffer()) == "Ermou 10"
+
+        # 2. spaces at the start and end are removed, capitals are kept
+        @test P.ask_text("Address: "; io_in = IOBuffer("  Ermou 10  \n"), io_out = IOBuffer()) == "Ermou 10"
+
+        # 3. an empty line is refused, then the next line is accepted
+        out = IOBuffer()
+        @test P.ask_text("Address: "; io_in = IOBuffer("\nErmou 10\n"), io_out = out) == "Ermou 10"
+        @test occursin("Please enter some text.", String(take!(out)))
+
+        # 4. exit words give nothing, in any spelling
+        @test isnothing(P.ask_text("Address: "; io_in = IOBuffer("q\n"), io_out = IOBuffer()))
+        @test isnothing(P.ask_text("Address: "; io_in = IOBuffer("Exit\n"), io_out = IOBuffer()))
+
+        # 5. input that ends gives nothing
+        @test isnothing(P.ask_text("Address: "; io_in = IOBuffer(""), io_out = IOBuffer()))
+
+        # 6. the result is a plain String
+        @test P.ask_text("Address: "; io_in = IOBuffer("Ermou 10\n"), io_out = IOBuffer()) isa String
+    end
 end
+
+
  
