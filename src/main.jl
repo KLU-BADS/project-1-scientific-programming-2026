@@ -28,20 +28,24 @@ function main()
     cities = Project1.available_cities(Project1.CONFIG.cities, joinpath(Project1.PROJECT_ROOT, "data", "raw"))
     # Project1. is needed because these functions are not exported
 
-    # 2. choose the city: a menu if there are several, no question if there is only one
-    city = length(cities) == 1 ? only(cities) : Project1.ask_choice("Which city?", [c => c for c in cities])
-    # [c => c for c in cities] gives label => value pairs, e.g. "Athens" => "Athens", as ask_choice expects
-    isnothing(city) && return nothing
-    # Exit (or q) in the city menu ends the program before anything is loaded
+    # the program repeats until the user leaves the city menu or chooses Exit in the main menu
+    while true
+        # 2. choose the city: a menu if there are several, no question if there is only one
+        city = length(cities) == 1 ? only(cities) : Project1.ask_choice("Which city?", [c => c for c in cities])
+        isnothing(city) && return nothing
+        # Exit (or q) in the city menu ends the program
 
-    # 3. prepare the data of the chosen city, fit the models and open the menu
-    println("Loading and preparing the data of $city …")
-    (df_processed, fitted) = run_training_pipeline(Project1.data_filepath(city); city = city)
-    println("Running analysis …")
-    analysis = run_analysis_pipeline(df_processed)
-    println("Initializing user interface …")
-    gui(merge(analysis, (fitted = fitted,)))
-    return nothing
+        # 3. prepare the data of the chosen city, fit the models and open the menu
+        println("Loading and preparing the data of $city …")
+        (df_processed, fitted) = run_training_pipeline(Project1.data_filepath(city); city = city)
+        println("Running analysis …")
+        analysis = run_analysis_pipeline(df_processed)
+        println("Initializing user interface …")
+        next = gui(merge(analysis, (fitted = fitted,)))
+
+        # 4. back to the city menu only if the user chose "Change city"; Exit ends the program
+        next == :change_city || return nothing
+    end
 end
 
 
