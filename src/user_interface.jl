@@ -44,6 +44,13 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
             # 3. a new or a listed apartment: ask for its data, predict, and show the result screen
             answers = enter_apartment_data(choice, analysis.df_training; io_in = io_in, io_out = io_out)
             # choice is :new or :listed, so the questions match the group (a listed apartment also gets its price and nights)
+            # let the user check the answers; "no" asks every question again, q cancels
+            while !isnothing(answers)
+                confirmed = confirm_answers(answers; io_in = io_in, io_out = io_out)
+                confirmed === true && break
+                answers = confirmed === false ? enter_apartment_data(choice, analysis.df_training; io_in = io_in, io_out = io_out) : nothing
+            end
+            # === compares exactly, so nothing (q) is neither true nor false and cancels
             if isnothing(answers)
                 println(io_out, "Cancelled.")
             else
@@ -146,6 +153,30 @@ function enter_apartment_data(group::Symbol, df_training::DataFrame; io_in::IO =
         ask_numbers!(answers, listed_rules, df_training, CONFIG.plausibility_rules; io_in = io_in, io_out = io_out) || return nothing
     end
     return answers
+end
+
+"""
+    confirm_answers(answers; io_in = stdin, io_out = stdout) -> Union{Bool, Nothing}
+
+Show every answer about the apartment and ask whether they are correct, before the prediction starts.
+
+# Arguments
+- `answers::AbstractDict{Symbol,Any}`:  the answers from `enter_apartment_data`.
+- `io_in::IO`:                          input stream (default `stdin`); pass an `IOBuffer` in tests.
+- `io_out::IO`:                         output stream for the summary and the question (default `stdout`).
+
+Returns `true` if the answers are correct, `false` if they should be entered again,
+or `nothing` if the user enters `q`, `quit` or `exit`.
+"""
+function confirm_answers(answers::AbstractDict{Symbol,Any}; io_in::IO = stdin, io_out::IO = stdout)
+    # 1. one line per answer, sorted by name so the order is always the same
+    println(io_out, "Your answers:")
+    for key in sort(collect(keys(answers)))
+        println(io_out, "  ", key, ": ", answers[key])
+    end
+    # collect turns the keys into a list that sort can order; Symbols are sorted alphabetically
+    # 2. ask whether everything is correct
+    return ask_yes_no("Are these answers correct? (y/n) "; io_in = io_in, io_out = io_out)
 end
 
 """
