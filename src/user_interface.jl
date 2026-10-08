@@ -22,33 +22,43 @@ No example here: the menus need a real keyboard, so gui is tested by hand in the
 function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
     # the group importance fits the price model once per group, so it is computed on the first visit only
     importance = nothing
+    # nothing means "not computed yet"; the findings screen fills it in the first time it is opened
 
+    # the menu repeats until the user chooses Exit, which ends the function with return
     while true
         # 1. the main menu; ask_choice adds Exit itself and gives back nothing for it
         choice = ask_choice("What would you like to do?", ["Market findings" => :findings, "Price a new apartment" => :new, "Check my listed apartment" => :listed])
+        # every option is a pair "label" => value: the user sees the label, the program gets the Symbol
         isnothing(choice) && return nothing
+        # a && b only runs b when a is true, so Exit (or q) leaves the loop and the whole function
 
         # 2. the market findings, with the importance table computed once and reused on every later visit
         if choice == :findings
             if isnothing(importance)
                 fit = get_fit(analysis.fits, :price)
+                # the importance is measured on the price model, the one the users see their price from
                 importance = group_importance(analysis.df_training, analysis.df_test, fit.spec, CONFIG.importance_groups; reference_levels = CONFIG.reference_levels)
             end
             visualize_general_findings(analysis; io = io_out, importance = importance)
         else
             # 3. a new or a listed apartment: ask for its data, predict, and show the result screen
             answers = enter_apartment_data(choice, analysis.df_training; io_in = io_in, io_out = io_out)
+            # choice is :new or :listed, so the questions match the group (a listed apartment also gets its price and nights)
             if isnothing(answers)
                 println(io_out, "Cancelled.")
             else
                 try
                     df = run_inference_pipeline(import_user_input(answers), analysis.fitted)
+                    # the answers become a one-row table and get the same preparation as the training data
                     result = run_prediction_pipeline(analysis, df, choice)
+                    # the price range, revenue, assessment and tips of this one apartment
                     visualize_results(result; io = io_out)
                 catch exception
                     # a wrong answer stops only this prediction; any other error is a bug, so it stops the program
                     exception isa ArgumentError || rethrow()
+                    # a || b only runs b when a is false; rethrow() passes the same error on unchanged
                     println(io_out, "Could not predict this apartment: ", exception.msg)
+                    # .msg is the sentence the ArgumentError was created with, e.g. "group must be :new or :listed"
                 end
             end
             # enter_apartment_data gives back nothing when the user leaves a question, so nothing is predicted
@@ -57,6 +67,7 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
         # 4. wait, so the screen stays visible until the user has read it
         println(io_out, "Press Enter to return to the menu.")
         readline(io_in)
+        # readline waits for one line of input; what the user types is not needed, so it is not stored
     end
 end
 
