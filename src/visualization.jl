@@ -375,8 +375,13 @@ end
     visualize_general_findings(analysis; io = stdout, importance = nothing)
 
 Print the market findings screen: the size and price level of the city's market, the price charts,
-how well the models predict, what drives the price, how close the predictions are on the test set,
-and the limits of these findings.
+how well the models predict, what drives the price, the detail lines, how close the predictions are
+on the test set, and the limits of these findings.
+
+The detail lines list the room type and the significant amenities of the `:price` model (from `term_effects`,
+with p-values below `CONFIG.significance_level`), each as an effect on the price in percent, and the rating
+effects per `CONFIG.rating_tips.step` points from the `:price_explain` model (from `rating_effects`).
+Without a `:price_explain` model the rating lines are left out.
 
 # Arguments
 - `analysis::NamedTuple`:   The result of `run_analysis_pipeline` with `fits`, `scores`, `df_training` and `df_test`.
