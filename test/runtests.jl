@@ -1627,6 +1627,56 @@ const P = Project1
         @test terms isa Vector{String}
     end 
 
+    @testset "amenity_effects" begin
+        # 1. made-up data: AC and TV raise the price by about 10.5%, a kettle by only 0.5%
+        random_n_generator = P.Random.Xoshiro(42)
+        n = 200
+        has_AC = rand(random_n_generator, 0:1, n)
+        has_tv = rand(random_n_generator, 0:1, n)
+        has_kettle = rand(random_n_generator, 0:1, n)
+        price = exp.(4.0 .+ 0.10 .* has_AC .+ 0.10 .* has_tv .+ 0.005 .* has_kettle .+ 0.01 .* randn(random_n_generator, n))
+        df = DataFrame(has_AC = has_AC, has_tv = has_tv, has_kettle = has_kettle, price = price)
+
+        # 2. fit a log model on the three amenities
+        spec = (target = :price, log_scale = true, log1p_predictors = Symbol[],
+                predictors = [:has_AC, :has_tv, :has_kettle])
+        fit = P.regression_city(df, spec)
+
+        # 3. an apartment without AC and kettle, but with a TV; keep a copy to check it is not changed
+        df_row = DataFrame(has_AC = 0, has_tv = 1, has_kettle = 0)
+        df_row_before = copy(df_row)
+        tips = P.amenity_effects(fit, df_row, [:has_AC, :has_tv, :has_kettle]; min_effect_pct = 1.0)
+
+        # 4. the table has the three columns visualize_results reads
+        @test names(tips) == ["amenity", "change", "change_pct"]
+        # names returns the column names as strings, in their order
+
+        # 5. a strong effect appears, with a positive change
+        @test :has_AC ∈ tips.amenity
+        # AC is missing, significant and about +10.5%, so it passes all three checks
+        @test all(tips.change .> 0)
+        # every tip raises the price, so every change in euros is above 0
+
+        # 6. an amenity the apartment already has is skipped
+        @test :has_tv ∉ tips.amenity
+        # the TV has the same strong effect as AC, so only the 1 in df_row keeps it out
+
+        # 7. a +0.5% effect is left out at min_effect_pct = 1.0
+        @test :has_kettle ∉ tips.amenity
+        # the kettle is significant (little noise), so only the size filter removes it
+
+        # 8. the input row is unchanged
+        @test df_row == df_row_before
+        # the function switches amenities on in a copy, never in df_row itself
+
+        # 9. if nothing qualifies, the table is empty but keeps its columns
+        no_tips = P.amenity_effects(fit, df_row, [:has_AC, :has_tv, :has_kettle]; alpha = 0.0)
+        @test nrow(no_tips) == 0
+        # no p-value is below 0, so no amenity passes the significance check
+        @test names(no_tips) == names(tips)
+        # visualize_results needs the columns even when there are no rows
+    end
+
     # ------------------------------------------------------------------------------------------
     # visualization.jl
     # ------------------------------------------------------------------------------------------
