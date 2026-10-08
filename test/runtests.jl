@@ -2363,6 +2363,34 @@ const P = Project1
         # 5. error case: a group that is not on the menu is rejected
         @test_throws ArgumentError P.run_prediction_pipeline(analysis, apartment, :rental)
         # only :listed and :new exist, anything else stops before any work is done
+
+        # 6. happy path: the tips come from the real models and only suggest what the apartment can still gain
+        bare = copy(apartment)
+        for amenity in P.CONFIG.actionable_amenities
+            bare[1, amenity] = 0
+        end
+        # the same listing without any actionable amenity, so it always has something to gain
+        bare_result = P.run_prediction_pipeline(analysis, bare, :listed)
+        @test !isempty(bare_result.tips)
+        # several amenities have a significant effect in the real data, so the tips cannot be empty here
+        @test all(amenity -> amenity in P.CONFIG.actionable_amenities, bare_result.tips.amenity)
+        # only amenities a host can add are suggested
+        @test names(listed.tips) == ["amenity", "change", "change_pct"]
+        # amenity_effects gives the three columns visualize_results reads
+        @test all(amenity -> apartment[1, amenity] == 0, listed.tips.amenity)
+        # every amenity tip is one the apartment does not have yet
+        @test all(bare_result.tips.change .> 0)
+        # every amenity tip raises the price; bare_result is used so the check runs on real rows
+        @test all(bare_result.tips.change_pct .>= P.CONFIG.min_effect_pct)
+        # effects smaller than CONFIG.min_effect_pct are left out
+        @test names(listed.rating_tips) == ["score", "pct_per_step"]
+        # rating_effects gives the score and its effect per step
+        @test all(score -> score in P.CONFIG.rating_tips.columns, listed.rating_tips.score)
+        # only the scores chosen in CONFIG.rating_tips can become a tip
+        @test all(listed.rating_tips.pct_per_step .> 0)
+        # rating_effects keeps only scores whose higher rating raises the price
+        @test new.tips == listed.tips
+        # the tips depend on the apartment and the models only, not on whether it is new or listed
     end
 
     @testset "run_analysis_pipeline" begin

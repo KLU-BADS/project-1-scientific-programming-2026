@@ -66,6 +66,11 @@ Returns the bundle for `visualize_results`: `group`, `level`, `price` (`median`,
 `nights`, `revenue` (`estimate`, `lower`, `upper`), `current_price`, `assessment` (`status`, `difference`),
 `district`, `room_type`, `tips` and `rating_tips`.
 
+The tips come from `amenity_effects` on the `:price` model: the amenities of `CONFIG.actionable_amenities`
+the apartment does not have yet, with a significant effect of at least `CONFIG.min_effect_pct` percent.
+The rating tips come from `rating_effects` on the `:price_explain` model, the only model with the rating
+sub-scores, for the scores in `CONFIG.rating_tips`.
+
 # Examples
 No example here: the function needs the models fitted on the real listings, so its use is shown in the tests.
 """
@@ -117,11 +122,14 @@ function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Sym
     end
     # high is the occupancy that counts as "well booked" for comparable listings
 
-    # 7. tips: empty tables in the final shape until amenity_effects and rating_effects are merged
-    # TODO (#186): replace with amenity_effects and rating_effects
-    tips = DataFrame(amenity = Symbol[], change = Float64[], change_pct = Float64[])
-    rating_tips = DataFrame(score = Symbol[], pct_per_step = Float64[])
-    # Symbol[] and Float64[] are empty columns of the right type, so visualize_results can read them already
+    # 7. tips: the missing amenities that would raise the price, and the ratings that pay off
+    tips = amenity_effects(fit, df, CONFIG.actionable_amenities;
+                           alpha = CONFIG.significance_level, min_effect_pct = CONFIG.min_effect_pct)
+    # only amenities the apartment does not have yet, with a significant effect of at least CONFIG.min_effect_pct percent
+    explain_fit = get_fit(analysis.fits, :price_explain)
+    rating_tips = rating_effects(explain_fit, CONFIG.rating_tips.columns;
+                                 step = CONFIG.rating_tips.step, alpha = CONFIG.significance_level)
+    # the rating sub-scores are only predictors of :price_explain, so the rating tips come from that model
 
     # 8. one bundle with every number of the screen
     # the field names are exactly the ones visualize_results reads
