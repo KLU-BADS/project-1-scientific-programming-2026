@@ -41,9 +41,15 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
             if isnothing(answers)
                 println(io_out, "Cancelled.")
             else
-                df = run_inference_pipeline(import_user_input(answers), analysis.fitted)
-                result = run_prediction_pipeline(analysis, df, choice)
-                visualize_results(result; io = io_out)
+                try
+                    df = run_inference_pipeline(import_user_input(answers), analysis.fitted)
+                    result = run_prediction_pipeline(analysis, df, choice)
+                    visualize_results(result; io = io_out)
+                catch exception
+                    # a wrong answer stops only this prediction; any other error is a bug, so it stops the program
+                    exception isa ArgumentError || rethrow()
+                    println(io_out, "Could not predict this apartment: ", exception.msg)
+                end
             end
             # enter_apartment_data gives back nothing when the user leaves a question, so nothing is predicted
         end
