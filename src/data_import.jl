@@ -41,7 +41,7 @@ ERROR: ArgumentError: missing answer for bedrooms
 function import_user_input(answers::AbstractDict{Symbol})
     # take user input dictionary and put it into DataFrame
     for (column, value) in answers
-        isnothing(value)  && throw(ArgumentError("missing answer for $column"))   
+        isnothing(value) && throw(ArgumentError("missing answer for $column"))   
     end
     # adds values from user input in new columns to 1-row data frame in alphabetical order
     keys_sorted = sort(collect(keys(answers)))
