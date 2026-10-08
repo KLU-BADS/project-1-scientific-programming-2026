@@ -1962,6 +1962,18 @@ const P = Project1
             @test occursin(name, real_output)
         end
         # every group of CONFIG.importance_groups has a bar in the real importance chart
+
+        # 7. happy path: the footer names the four limits of the findings
+        @test occursin("Limits of these findings", output)
+        # the footer starts with its own title line after the last plot
+        @test occursin("Occupancy is an estimate from reviews", output)
+        # limit 1: the nights are estimated, so every revenue number is an estimate too
+        @test occursin("one random split", output)
+        # limit 2: the model scores depend on which listings landed in the test set
+        @test occursin("every answer is limited", output)
+        # limit 3: the input is restricted because extreme answers break the predictions
+        @test occursin("Amenity effects are correlations", output)
+        # limit 4: an amenity effect is not a promise that adding it raises the price
     end
 
     # ------------------------------------------------------------------------------------------
