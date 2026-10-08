@@ -1,25 +1,29 @@
 """
-    run_training_pipeline(filepath = CONFIG.filepath) -> NamedTuple
+    run_training_pipeline(filepath = CONFIG.filepath; city = CONFIG.city) -> NamedTuple
 
 Run data pre-processing pipeline for the training data used in the regression model. Import the listings.csv 
 file into a DataFrame and run all pre-processing steps in the order of the design: select columns, rename, 
 set types, remove duplicates and listings without bookings, handle missing values, remove zero denominators 
 and outliers,  create dummies, ratios and the distance to the city center. Every step is controlled by `CONFIG`.
 
+# Arguments
+- `filepath::String`:   path of the listings file (default `CONFIG.filepath`), e.g. `data_filepath(city)`.
+- `city::String`:       keyword, the city of the file (default `CONFIG.city`); selects the currency and the city centre.
+
 Returns a named tuple `(df, fitted)`:
 - `df`: the processed listings as DataFrame.
 - `fitted`: the values learned from the training data, which the inference pipeline has to reuse on a single
-  apartment: `caps` (upper limits per room type), `kept_districts` (districts that are not grouped as rare)
-  and `square_centers` (the centres of the squared columns).
+  apartment: `caps` (upper limits per room type), `kept_districts` (districts that are not grouped as rare),
+  `square_centers` (the centres of the squared columns) and `city` (the city the data belongs to).
 
 <!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
-function run_training_pipeline(filepath::String = CONFIG.filepath)
+function run_training_pipeline(filepath::String = CONFIG.filepath; city::String = CONFIG.city)
     df = import_csv(filepath)
     df = filter_columns(df, CONFIG.relevant_columns)
     format_labels!(df, CONFIG.label_mapping)
     set_types!(df, CONFIG.column_types)
-    convert_currency!(df, CONFIG.currency_rules, CONFIG.cities[CONFIG.city].currency)
+    convert_currency!(df, CONFIG.currency_rules, CONFIG.cities[city].currency)
     remove_duplicates!(df, CONFIG.deduplicate_columns)
     remove_if_zero!(df, CONFIG.no_booking_columns)
     process_missing!(df, CONFIG.missing_rules)
@@ -37,7 +41,7 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
     for rule in CONFIG.ratio_rules
         calculate_ratio!(df, rule)
     end
-    calculate_distance!(df, CONFIG.distance_rule, CONFIG.cities[CONFIG.city].center)
+    calculate_distance!(df, CONFIG.distance_rule, CONFIG.cities[city].center)
     kept = kept_categories(df, CONFIG.category_rule)
     group_rare_categories!(df, CONFIG.category_rule, kept)
     centers = Dict{Symbol,Float64}()
@@ -45,7 +49,8 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
         centers[rule.source] = square_center(df, rule)
         calculate_square!(df, rule, centers[rule.source])
     end
-    return (df = df, fitted = (caps = caps, kept_districts = kept, square_centers = centers))
+    return (df = df, fitted = (caps = caps, kept_districts = kept, square_centers = centers, city = city))
+    # the city is stored with the other learned values, so prediction later uses the same city centre
 end
 
 """
