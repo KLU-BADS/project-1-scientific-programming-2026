@@ -74,3 +74,30 @@ function import_user_input(answers::AbstractDict{Symbol})
     end
     return df_apartment
 end
+
+"""
+    data_filepath(city; data_dir = joinpath(PROJECT_ROOT, "data", "raw")) -> String
+
+Build the path of the listings file of `city`: `<data_dir>/<city>_listings.csv`, with the city name in lowercase.
+This is the one place where the file name of a city is built, so the menu and the training pipeline use the same path.
+
+# Arguments
+- `city::AbstractString`:       name of the city as in `CONFIG.cities`, e.g. `"Athens"`.
+- `data_dir::AbstractString`:   folder of the listings files (default `data/raw` of the project).
+
+Returns the path as a `String`. The function does not check that the file exists; `available_cities` does.
+
+# Examples
+```julia
+data_filepath("Athens")                       # ".../data/raw/athens_listings.csv"
+data_filepath("Madrid"; data_dir = "/tmp")    # "/tmp/madrid_listings.csv"
+```
+"""
+function data_filepath(city::AbstractString; data_dir::AbstractString = joinpath(PROJECT_ROOT, "data", "raw"))
+    # 1. build the file name from the city name in lowercase, as in CONFIG.filepath
+    file_name = lowercase(city) * "_listings.csv"
+    # "Athens" becomes "athens_listings.csv"; * joins two texts in Julia
+    # 2. put the folder in front of the file name
+    return joinpath(data_dir, file_name)
+    # joinpath adds the right separator (/ on macOS), so the path works on every system
+end
