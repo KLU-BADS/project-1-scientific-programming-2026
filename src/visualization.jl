@@ -367,6 +367,9 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
     # 7. footer: the numbers describe comparable listings, they do not promise anything
     println(io, "Based on comparable listings, not a guarantee.")
     # the same sentence closes every result screen, for a new and a listed apartment
+    println(io, "  The model scores come from one random split; another split gives slightly different values.")
+    println(io, "  Predictions are only reliable for apartments like the listings, so every answer is limited.")
+    # the same two limits as on the findings screen: one random split, and answers kept inside the data
 
     return nothing
 end
