@@ -1724,6 +1724,53 @@ const P = Project1
         # the columns are still there, so the printer can loop over an empty table without an error
     end
 
+    @testset "term_effects" begin
+        # 1. made-up data: AC raises the price by exp(0.1) - 1 = 10.52%
+        random_n_generator = P.Random.Xoshiro(42)
+        n = 200
+        has_AC = rand(random_n_generator, 0:1, n)
+        price = exp.(4.0 .+ 0.1 .* has_AC .+ 0.001 .* randn(random_n_generator, n))
+        # the noise is tiny (0.001), so the model finds the coefficient almost exactly
+        y = 2.0 .+ 3.0 .* has_AC .+ 0.001 .* randn(random_n_generator, n)
+        # a second target without exp, for a plain (not log) model with coefficient 3
+        df = DataFrame(has_AC = has_AC, price = price, y = y)
+
+        # 2. fit a log model and a plain model, each with AC as the only predictor
+        log_spec = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:has_AC])
+        log_fit = P.regression_city(df, log_spec)
+        plain_spec = (target = :y, log_scale = false, log1p_predictors = Symbol[], predictors = [:has_AC])
+        plain_fit = P.regression_city(df, plain_spec)
+
+        # 3. the effects of both models
+        effects = P.term_effects(log_fit)
+        plain_effects = P.term_effects(plain_fit)
+
+        # 4. the table has the three columns from the spec
+        @test names(effects) == ["term", "pct", "pvalue"]
+        # the general findings screen (#187) will read term, pct and pvalue
+
+        # 5. there is no intercept row
+        @test "(Intercept)" ∉ effects.term
+        # the intercept is skipped with continue, it is not an effect of any term
+
+        # 6. one row per predictor, and it is AC, named as GLM writes it
+        @test nrow(effects) == 1
+        # the model has one predictor besides the intercept, so the table has one row
+        @test effects.term[1] == "has_AC"
+        # the name is a String like "has_AC", the way CONFIG.term_labels will look it up
+
+        # 7. in a log model the coefficient 0.1 gives about 10.52%
+        @test isapprox(effects.pct[1], 10.52; atol = 0.05)
+        # 100 * (exp(0.1) - 1) = 10.517
+
+        # 8. a strong effect has a small p-value
+        @test effects.pvalue[1] < 0.05
+        # with so little noise the effect of AC is clearly significant
+
+        # 9. in a plain model the effect is the coefficient itself
+        @test isapprox(plain_effects.pct[1], 3.0; atol = 0.05)
+        # log_scale is false, so pct = b, and b is about 3
+    end
 
     # ------------------------------------------------------------------------------------------
     # visualization.jl
