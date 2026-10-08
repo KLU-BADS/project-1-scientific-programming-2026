@@ -59,9 +59,15 @@ revenue, for a listed apartment the assessment of its current price, and the tip
 - `df::DataFrame`:        One prepared apartment (one row) with every predictor of the price model.
 - `group::Symbol`:        `:listed` for an apartment that is already rented out, `:new` for one that is not.
 
+# Throws
+- `ArgumentError` if `group` is not `:listed` or `:new`.
+
 Returns the bundle for `visualize_results`: `group`, `level`, `price` (`median`, `mean`, `lower`, `upper`),
 `nights`, `revenue` (`estimate`, `lower`, `upper`), `current_price`, `assessment` (`status`, `difference`),
-`district`, `room_type`, `tips` and `rating_tips`. Throws an `ArgumentError` for any other group.
+`district`, `room_type`, `tips` and `rating_tips`.
+
+# Examples
+No example here: the function needs the models fitted on the real listings, so its use is shown in the tests.
 """
 function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Symbol)
     # 1. only the two groups of the menu are allowed
