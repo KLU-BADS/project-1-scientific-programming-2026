@@ -338,7 +338,7 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
 end
 
 """
-    visualize_general_findings(analysis; io = stdout)
+    visualize_general_findings(analysis; io = stdout, importance = nothing)
 
 Print the market findings screen: the size and price level of the city's market, the price charts,
 how well the models predict, what drives the price, and how close the predictions are on the test set.
@@ -347,7 +347,11 @@ how well the models predict, what drives the price, and how close the prediction
 - `analysis::NamedTuple`:   The result of `run_analysis_pipeline` with `fits`, `scores`, `df_training` and `df_test`.
 - `io::IO`:                 Where the screen is printed (default `stdout`, the terminal).
 - `importance`:             Table from `group_importance` if it was computed before; computed here when `nothing` (default).
+
 Returns `nothing`, the screen is only printed.
+
+# Examples
+No example here: the screen needs the models fitted on the real listings, so its use is shown in the tests.
 """
 function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, importance = nothing)
     # 1. all listings of the city: the training and the test set together
