@@ -10,15 +10,25 @@ using Project1
 """
     main()
 
-Excecute the program.
+Run the HostWise program: prepare the data, fit the models and open the menu in the terminal.
+
+1. `run_training_pipeline()` imports and prepares the listings of `CONFIG.city` and keeps the values
+   learned from them (`fitted`: caps, kept districts, square centres).
+2. `run_analysis_pipeline(df)` splits the data into a training and a test set and fits and scores the models.
+3. `gui(...)` opens the main menu with the analysis and `fitted`; the program ends when the user chooses "Exit".
+
+Start it from a terminal with `julia src/main.jl`: the menus need a real terminal.
 
 Returns `nothing`.
-
-<!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
 function main()
-    #result = run_training_pipeline()
-    #analysis = run_analysis_pipeline(result.df)
+    println("Loading and preparing the data …")
+    (df_processed, fitted) = run_training_pipeline()
+    println("Running analysis …")
+    analysis = run_analysis_pipeline(df_processed)
+    println("Initializing user interface …")
+    gui(merge(analysis, (fitted = fitted,)))
+    return nothing
 end
 
 
