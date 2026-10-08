@@ -35,6 +35,17 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
                 importance = group_importance(analysis.df_training, analysis.df_test, fit.spec, CONFIG.importance_groups; reference_levels = CONFIG.reference_levels)
             end
             visualize_general_findings(analysis; io = io_out, importance = importance)
+        else
+            # 3. a new or a listed apartment: ask for its data, predict, and show the result screen
+            answers = enter_apartment_data(choice, analysis.df_training; io_in = io_in, io_out = io_out)
+            if isnothing(answers)
+                println(io_out, "Cancelled.")
+            else
+                df = run_inference_pipeline(import_user_input(answers), analysis.fitted)
+                result = run_prediction_pipeline(analysis, df, choice)
+                visualize_results(result; io = io_out)
+            end
+            # enter_apartment_data gives back nothing when the user leaves a question, so nothing is predicted
         end
 
         # 4. wait, so the screen stays visible until the user has read it
