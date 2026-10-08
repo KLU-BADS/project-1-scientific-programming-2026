@@ -117,6 +117,9 @@ Print a histogram of the price per night of all listings in `df`, to show how th
 - `io::IO`:         Where the chart is printed (default `stdout`, the terminal).
 
 Returns `nothing`, the chart is only printed.
+
+# Examples
+No example here: the chart is a drawing whose exact characters come from UnicodePlots, so its use is shown in the tests.
 """
 function plot_price_distribution(df::DataFrame; nbins::Int = 20, io::IO = stdout)
     # 1. the prices as plain numbers, without empty cells
@@ -148,6 +151,9 @@ the room type with the most listings first.
 - `io::IO`:         Where the chart is printed (default `stdout`, the terminal).
 
 Returns `nothing`, the chart is only printed.
+
+# Examples
+No example here: the chart is a drawing whose exact characters come from UnicodePlots, so its use is shown in the tests.
 """
 function plot_price_by_room_type(df::DataFrame, min_count::Int; io::IO = stdout)
     # 1. count the listings of every room type
@@ -189,6 +195,9 @@ Print a bar chart of how much each group of predictors adds to the fit of the pr
 - `io::IO`:                 Where the chart is printed (default `stdout`, the terminal).
 
 Returns `nothing`, the chart is only printed.
+
+# Examples
+No example here: the chart is a drawing whose exact characters come from UnicodePlots, so its use is shown in the tests.
 """
 function plot_group_importance(importance::DataFrame; io::IO = stdout)
     # 1. stop with a short message if there is nothing to draw, because barplot cannot draw zero bars
@@ -225,6 +234,9 @@ with the diagonal where both are equal.
 - `ArgumentError`: if both are empty.
 
 Returns `nothing`, the chart is only printed.
+
+# Examples
+No example here: the chart is a drawing whose exact characters come from UnicodePlots, so its use is shown in the tests.
 """
 function plot_predicted_vs_actual(actual::AbstractVector, predicted::AbstractVector; io::IO = stdout)
     # 1. both vectors must describe the same listings, and there must be at least one
@@ -265,6 +277,9 @@ the assessment of its current price, the expected revenue, and tips to raise the
   that has no label in `CONFIG.amenity_labels`.
 
 Returns `nothing`, the screen is only printed.
+
+# Examples
+No example here: the screen needs a whole result bundle from `run_prediction_pipeline`, so its use is shown in the tests.
 """
 function visualize_results(result::NamedTuple; io::IO = stdout)
     # 1. header: a listed or a new apartment, then where it is and what kind of place it is
