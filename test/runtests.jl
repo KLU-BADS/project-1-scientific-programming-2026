@@ -1634,6 +1634,7 @@ const P = Project1
     @testset "format_eur" begin
         # 1. happy path: whole euros get a comma between every three digits
         @test P.format_eur(7272) == "€7,272"
+        # 7272 has four digits, so one comma goes before the last three
         @test P.format_eur(1234567.8) == "€1,234,568"
         # 1234567.8 is rounded to 1234568 first, then two commas are added
         @test P.format_eur(140) == "€140"
@@ -1641,11 +1642,13 @@ const P = Project1
 
         # 2. happy path: decimals are kept when digits is given
         @test P.format_eur(7.5; digits = 2) == "€7.50"
+        # digits = 2 always shows two decimals, so 7.5 gets a trailing 0
         @test P.format_eur(1234.5; digits = 2) == "€1,234.50"
         # the comma only goes into the whole part, the decimals stay as they are
 
         # 3. edge case: zero and a negative amount
         @test P.format_eur(0) == "€0"
+        # zero is a normal amount, written without a comma
         @test P.format_eur(-1234) == "€-1,234"
         # no comma after the minus sign, because the pattern needs a digit before the comma
 
@@ -1661,10 +1664,13 @@ const P = Project1
 
         # 2. happy path: the marker sits at the ends when the price is at the lower or upper end
         @test P.range_bar(60, 140, 60; width = 9) == "€60 [●========] €140"
+        # 60 is the lower end, so ● takes the first place
         @test P.range_bar(60, 140, 140; width = 9) == "€60 [========●] €140"
+        # 140 is the upper end, so ● takes the last place
 
         # 3. happy path: a current price inside the range gets ▲ and the bar keeps its ends
         @test P.range_bar(60, 140, 100; width = 9, current = 80) == "€60 [==▲=●====] €140"
+        # 80 is a quarter of the way from 60 to 140, so ▲ lands on place 3 while ● stays on place 5
 
         # 4. edge case: a current price above the range stretches the bar up to that price
         @test P.range_bar(60, 140, 100; width = 9, current = 180) == "€60 [===●==  ▲] €180"
@@ -1693,7 +1699,9 @@ const P = Project1
 
         # 10. error case: an upside down range and a bar without places are rejected
         @test_throws ArgumentError P.range_bar(140, 60, 100)
+        # lower 140 is larger than upper 60, so there is no range to draw
         @test_throws ArgumentError P.range_bar(60, 140, 100; width = 0)
+        # width 0 leaves no place for any marker
     end
 
     @testset "plot_price_distribution" begin
@@ -1706,6 +1714,7 @@ const P = Project1
         output = String(take!(io))
         # take! empties the IOBuffer and gives back what was printed into it, String turns it into text
         @test occursin("Price per night (EUR)", output)
+        # the histogram title is part of the printed text
         @test result === nothing
         # === checks it is exactly nothing, not just something equal to it
 
@@ -1713,6 +1722,7 @@ const P = Project1
         io = IOBuffer()
         P.plot_price_distribution(df; nbins = 3, io = io)
         @test occursin("Price per night (EUR)", String(take!(io)))
+        # nbins only changes how many bars are drawn, not whether the chart appears
 
         # 3. edge case: a price column read like CSV does, with room for empty cells and one empty cell
         df_csv = DataFrame(price = Union{Missing, Float64}[50.0, 60.0, missing, 80.0, 90.0])
@@ -1738,9 +1748,13 @@ const P = Project1
         result = P.plot_price_by_room_type(df, 2; io = io)
         output = String(take!(io))
         @test occursin("Price by room type", output)
+        # the title of the boxplot
         @test occursin("Entire home/apt", output)
+        # 3 entire homes reach min_count 2, so they get a box
         @test occursin("Private room", output)
+        # 2 private rooms are exactly min_count, so they get a box too
         @test result === nothing
+        # the chart is only printed, so the function gives back nothing
 
         # 2. edge case: a room type below min_count does not appear
         @test !occursin("Shared room", output)
@@ -1750,6 +1764,7 @@ const P = Project1
         io = IOBuffer()
         P.plot_price_by_room_type(df, 10; io = io)
         @test occursin("No room type has at least 10 listings.", String(take!(io)))
+        # the largest room type has only 3 listings, far below 10
 
         # 4. edge case: a price column read like CSV does, with one empty cell
         df_csv = DataFrame(room_type = ["Entire home/apt", "Entire home/apt", "Private room", "Private room"],
@@ -1757,6 +1772,7 @@ const P = Project1
         io = IOBuffer()
         P.plot_price_by_room_type(df_csv, 1; io = io)
         @test occursin("Price by room type", String(take!(io)))
+        # the empty price is skipped, so the boxplot is still drawn
 
         # 5. error case: a table without a room_type column is rejected
         @test_throws ArgumentError P.plot_price_by_room_type(DataFrame(price = [100.0]), 1; io = IOBuffer())
@@ -1772,9 +1788,13 @@ const P = Project1
         result = P.plot_group_importance(importance; io = io)
         output = String(take!(io))
         @test occursin("What drives the price", output)
+        # the title of the bar chart
         @test occursin("location", output)
+        # every group of the table gets its own bar with its name
         @test occursin("size", output)
+        # the second group is drawn as well
         @test result === nothing
+        # the chart is only printed, so the function gives back nothing
 
         # 2. edge case: a group with a negative loss still prints instead of stopping with an error
         importance_negative = DataFrame(group = ["location", "amenities"], r2_loss = [0.12, -0.01])
@@ -1787,6 +1807,7 @@ const P = Project1
         io = IOBuffer()
         P.plot_group_importance(DataFrame(group = String[], r2_loss = Float64[]); io = io)
         @test occursin("No groups of predictors to show.", String(take!(io)))
+        # with no rows there is nothing to draw, so a sentence replaces the chart
 
         # 4. error case: a table without the r2_loss column is rejected
         @test_throws ArgumentError P.plot_group_importance(DataFrame(group = ["location"]); io = IOBuffer())
@@ -1803,17 +1824,23 @@ const P = Project1
         result = P.plot_predicted_vs_actual(actual, predicted; io = io)
         output = String(take!(io))
         @test occursin("Test set", output)
+        # the title of the scatter plot
         @test occursin("actual EUR", output)
+        # the x axis label says which axis holds the real prices
         @test result === nothing
+        # the chart is only printed, so the function gives back nothing
 
         # 2. edge case: perfect predictions, every dot lies on the diagonal, still prints without error
         io = IOBuffer()
         P.plot_predicted_vs_actual(actual, actual; io = io)
         @test occursin("Test set", String(take!(io)))
+        # every dot lies on the diagonal, and UnicodePlots still draws both without an error
 
         # 3. error case: vectors of different length and empty vectors are rejected
         @test_throws DimensionMismatch P.plot_predicted_vs_actual([50.0, 80], [60.0]; io = IOBuffer())
+        # 2 real prices but only 1 prediction, so the pairs cannot be matched
         @test_throws ArgumentError P.plot_predicted_vs_actual(Float64[], Float64[]; io = IOBuffer())
+        # 2 real prices but only 1 prediction, so the pairs cannot be matched
     end
 
     @testset "visualize_results" begin
@@ -1841,33 +1868,46 @@ const P = Project1
         result = P.visualize_results(listed; io = io)
         output = String(take!(io))
         @test occursin("YOUR LISTING · Koukaki, Entire home/apt", output)
+        # a listed apartment gets YOUR LISTING, then the district and room type from the bundle
         @test occursin("Typical price for comparable listings   €96", output)
+        # the typical price is the median 96, not the mean 101
         @test occursin("Range (8 of 10 comparable)   €66 to €140", output)
+        # level 0.8 becomes "8 of 10", and both ends are written with format_eur
         @test occursin("▲", output)
+        # a listed apartment has a current price, so it is marked on the bar
         @test result === nothing
+        # the screen is only printed, so the function gives back nothing
 
         # 2. edge case: a new apartment has another header and no ▲, because it has no current price
         io = IOBuffer()
         P.visualize_results(new; io = io)
         output = String(take!(io))
         @test occursin("NEW LISTING", output)
+        # group :new changes the header
         @test !occursin("▲", output)
+        # current_price is nothing, so range_bar draws no ▲
 
         # 3. happy path: a listed apartment shows the assessment and the revenue with its range
         io = IOBuffer()
         P.visualize_results(listed; io = io)
         output = String(take!(io))
         @test occursin("Your price €150 is above the range by €10", output)
+        # 150 lies 10 above the upper end 140; the difference comes from the assessment
         @test occursin("possibly overpriced", output)
+        # :overpriced has its own message, printed in red
         @test occursin("Revenue at €101 × your 72 nights   €7,272", output)
+        # the revenue uses the mean price 101 times the 72 booked nights
         @test occursin("range €4,752 to €10,080", output)
+        # a listed apartment has its own booking history, so its revenue gets a range
 
         # 4. edge case: a new apartment gets no assessment and only a rough revenue estimate
         io = IOBuffer()
         P.visualize_results(new; io = io)
         output = String(take!(io))
         @test occursin("Expected revenue (rough estimate)   €7,272", output)
+        # without a booking history the nights are a guess, so the revenue is called rough
         @test !occursin("Your price", output)
+        # a new apartment has no current price, so the assessment lines are skipped
 
         # 5. edge case: a price inside the range is in line
         in_line = merge(listed, (current_price = 100.0, assessment = (status = :in_line, difference = 0.0)))
@@ -1875,7 +1915,9 @@ const P = Project1
         P.visualize_results(in_line; io = io)
         output = String(take!(io))
         @test occursin("Your price €100 is inside the range", output)
+        # 100 lies between 66 and 140, so the price is inside the range
         @test occursin("in line with comparable listings", output)
+        # :in_line has its own message, printed in green
 
         # 6. error case: an unknown status is rejected instead of printing a wrong message
         unknown = merge(listed, (assessment = (status = :cheap, difference = 5.0),))
@@ -1887,14 +1929,18 @@ const P = Project1
         P.visualize_results(listed; io = io)
         output = String(take!(io))
         @test occursin("+ Air conditioning   +€7.50 per night (+7.8%)", output)
+        # :has_AC gets its label from CONFIG.amenity_labels, the change is shown with 2 decimals
         @test occursin("Listings rated 0.1 higher for cleanliness charge about 1.3% more.", output)
+        # the score loses its review_scores_ prefix, and the step 0.1 comes from CONFIG.rating_tips
         @test occursin("Based on comparable listings, not a guarantee.", output)
+        # the footer closes every result screen
 
         # 8. edge case: an empty tips table prints the sentence instead of tips
         no_tips = merge(listed, (tips = DataFrame(amenity = Symbol[], change = Float64[], change_pct = Float64[]),))
         io = IOBuffer()
         P.visualize_results(no_tips; io = io)
         @test occursin("No missing amenity has a clear price effect.", String(take!(io)))
+        # an empty table means nothing to show, so the sentence replaces the tips
 
         # 9. edge case: with five tips only the first three are shown
         five_tips = merge(listed, (tips = DataFrame(amenity = [:has_AC, :has_tv, :has_kettle, :has_washer, :has_dishwasher],
@@ -1908,6 +1954,7 @@ const P = Project1
         # 10. error case: an amenity without a label in CONFIG is rejected
         unknown_amenity = merge(listed, (tips = DataFrame(amenity = [:has_jacuzzi], change = [9.0], change_pct = [9.0]),))
         @test_throws KeyError P.visualize_results(unknown_amenity; io = IOBuffer())
+        # :has_jacuzzi has no entry in CONFIG.amenity_labels, so the Dict lookup throws a KeyError
 
         # 11. edge case: the three statuses not covered above print where the price lies and their own message
         statuses = [
@@ -1922,7 +1969,9 @@ const P = Project1
             P.visualize_results(bundle; io = io)
             output = String(take!(io))
             @test occursin("Your price $(P.format_eur(price)) is $position", output)
+            # 50 is below the range and 150 above it, so the sentence names the right side
             @test occursin(message, output)
+            # every status has its own message
         end
         # @testset ... for runs the same two tests once for every row of the list, each as its own small test set
     end

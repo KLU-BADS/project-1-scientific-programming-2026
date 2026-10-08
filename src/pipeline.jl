@@ -72,27 +72,34 @@ No example here: the function needs the models fitted on the real listings, so i
 function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Symbol)
     # 1. only the two groups of the menu are allowed
     group in (:listed, :new) || throw(ArgumentError("group must be :listed or :new, got :$group"))
+    # a || b only runs b when a is false, so any other group stops here with a clear message
 
     # 2. the price range from the price model, the first element of each vector is our one apartment
     fit = get_fit(analysis.fits, :price)
     r = predict_price_range(fit, df; level = CONFIG.interval_level)
+    # level 0.8 gives the range in which 8 of 10 comparable listings lie, plus its median and mean
     price = (median = r.median[1], mean = r.mean[1], lower = r.lower[1], upper = r.upper[1])
+    # df has one row, so every vector has one value and [1] takes it out
 
     # 3. the typical occupancy of comparable listings (same district and room type)
     district = String(df.district[1])
     room_type = String(df.room_type[1])
     reference = occupancy_reference(analysis.df_training, district, room_type, CONFIG.occupancy_rule)
+    # the typical share of the year comparable listings are booked, e.g. 0.4 for 146 nights
     # String() turns the compact text type from CSV into plain text, occupancy_reference compares with it
 
     # 4. booked nights per year: a listed apartment has its own, a new one gets the typical occupancy
     nights = group == :listed ? Float64(df.estimated_occupancy_l365d[1]) : reference * 365
+    # cond ? a : b picks a for a listed apartment and b for a new one; reference is a share, so times 365 gives nights
 
     # 5. revenue: the mean price times the nights; only a listed apartment gets a range
     estimate = price.mean * nights
     if group == :listed
         revenue = (estimate = estimate, lower = price.lower * nights, upper = price.upper * nights)
+        # the revenue range uses the same nights with the lower and the upper end of the price range
     else
         revenue = (estimate = estimate, lower = nothing, upper = nothing)
+        # nothing tells visualize_results to show the estimate without a range
     end
     # the mean is used because revenue is an expected total, the recommended price is the median
 
@@ -101,7 +108,9 @@ function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Sym
         high = occupancy_reference(analysis.df_training, district, room_type, CONFIG.occupancy_rule;
                                    q = CONFIG.occupancy_rule.high_quantile)
         current_price = Float64(df.price[1])
+        # the price the host charges now, the one the assessment compares with the range
         assessment = assess_listing(current_price, price.lower, price.upper, nights / 365, high)
+        # nights / 365 turns the booked nights back into a share of the year, the same unit as high
     else
         current_price = nothing
         assessment = nothing
@@ -112,8 +121,10 @@ function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Sym
     # TODO (#186): replace with amenity_effects and rating_effects
     tips = DataFrame(amenity = Symbol[], change = Float64[], change_pct = Float64[])
     rating_tips = DataFrame(score = Symbol[], pct_per_step = Float64[])
+    # Symbol[] and Float64[] are empty columns of the right type, so visualize_results can read them already
 
     # 8. one bundle with every number of the screen
+    # the field names are exactly the ones visualize_results reads
     return (group = group, level = CONFIG.interval_level, price = price, nights = nights, revenue = revenue,
             current_price = current_price, assessment = assessment, district = district,
             room_type = room_type, tips = tips, rating_tips = rating_tips)
