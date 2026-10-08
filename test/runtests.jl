@@ -2207,6 +2207,30 @@ const P = Project1
         # limit 3: the input is restricted because extreme answers break the predictions
         @test occursin("Amenity effects are correlations", output)
         # limit 4: an amenity effect is not a promise that adding it raises the price
+
+        # 8. happy path: the detail lines show the room type, the significant amenities and the rating effects
+        @test occursin("In detail", output)
+        # the made-up market gets the heading too, even when none of its terms is a room type or an amenity
+        @test !occursin("per $(P.CONFIG.rating_tips.step) point", output)
+        # the made-up analysis has no :price_explain model, so no rating line is printed
+        @test occursin("In detail", real_output)
+        # the heading is on the real screen as well
+        @test occursin("private room instead of entire home", real_output)
+        # the private room term of the real price model gets its label from CONFIG.term_labels
+        price_fit = P.get_fit(real_analysis.fits, :price)
+        for row in eachrow(P.term_effects(price_fit))
+            amenity = Symbol(row.term)
+            if haskey(P.CONFIG.amenity_labels, amenity) && row.pvalue < P.CONFIG.significance_level
+                @test occursin(lowercase(P.CONFIG.amenity_labels[amenity]), real_output)
+            end
+        end
+        # every significant amenity of the real price model has a line with its readable name
+        explain_fit = P.get_fit(real_analysis.fits, :price_explain)
+        step = P.CONFIG.rating_tips.step
+        for row in eachrow(P.rating_effects(explain_fit, P.CONFIG.rating_tips.columns; step = step, alpha = P.CONFIG.significance_level))
+            @test occursin("$(P.CONFIG.term_labels[String(row.score)]), per $step point", real_output)
+        end
+        # every rating that raises the price gets a line with its effect per rating step
     end
 
     # ------------------------------------------------------------------------------------------
