@@ -788,3 +788,52 @@ function term_effects(fit::NamedTuple)
     # 3. give back the table
     return effects
 end
+
+"""
+    comparable_listings(df_training, df_row, distance_rule; n = 5) -> DataFrame
+
+Find the `n` listings of the training data that are most similar to one apartment: the same room type and
+the same number of bedrooms, the nearest first. If fewer than `n` listings have the same number of bedrooms,
+all listings of the same room type are used.
+
+# Arguments
+- `df_training::DataFrame`:     training data with the columns `room_type`, `bedrooms`, `latitude`, `longitude`,
+                                `district`, `accommodates`, `price` and `review_scores_rating`.
+- `df_row::DataFrame`:          one prepared apartment (one row), e.g. the result of `run_inference_pipeline`.
+- `distance_rule::NamedTuple`:  the distance rule from the config, e.g. `CONFIG.distance_rule`.
+- `n::Integer`:                 number of listings to return (default 5).
+
+# Throws
+- `ArgumentError`   if `n` is smaller than 1.
+
+Returns a `DataFrame` with the columns `district`, `accommodates`, `bedrooms`, `price`,
+`review_scores_rating` and `distance_km`, sorted by distance, with at most `n` rows.
+`df_training` is not changed.
+"""
+function comparable_listings(df_training::DataFrame, df_row::DataFrame, distance_rule::NamedTuple; n::Integer = 5)
+    # 1. at least one listing must be asked for
+    n >= 1 || throw(ArgumentError("n must be at least 1, got $n"))
+
+    # 2. the listings with the same room type and the same number of bedrooms
+    room_type = df_row.room_type[1]
+    bedrooms = df_row.bedrooms[1]
+    candidates = filter(row -> row.room_type == room_type && row.bedrooms == bedrooms, df_training)
+    # filter gives back a new table, so the distance column below is not added to df_training
+
+    # 3. too few of them: use every listing of the same room type instead
+    if nrow(candidates) < n
+        candidates = filter(row -> row.room_type == room_type, df_training)
+    end
+
+    # 4. the distance of every candidate to the apartment, in km
+    location = (latitude = df_row[1, distance_rule.source_columns.latitude],
+                longitude = df_row[1, distance_rule.source_columns.longitude])
+    calculate_distance!(candidates, merge(distance_rule, (target = :distance_km, delete = false)), location)
+    # the apartment takes the place of the city centre, as in derive_district; merge replaces target and delete
+
+    # 5. the nearest first, then the first n with the columns the result screen shows
+    sort!(candidates, :distance_km)
+    columns = [:district, :accommodates, :bedrooms, :price, :review_scores_rating, :distance_km]
+    return first(candidates[:, columns], n)
+    # first(df, n) gives at most n rows, also when the table has fewer
+end
