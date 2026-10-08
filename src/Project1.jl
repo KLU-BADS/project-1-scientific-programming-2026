@@ -18,6 +18,6 @@ include("pipeline.jl")
 # Functions to be exported
 export run_training_pipeline, run_inference_pipeline, run_analysis_pipeline, predict_apartment_performance, evaluate_regression, regression_city, prepare_predictors, split_dataset,
        import_csv, filter_columns, format_labels!, set_types!, convert_currency!, remove_duplicates!, remove_if_zero!, process_missing!, process_outliers!,
-       format_dummies!, calculate_ratio!, calculate_distance!
+       format_dummies!, calculate_ratio!, calculate_distance!, gui
 
 end # module Project1
