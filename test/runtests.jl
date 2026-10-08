@@ -1961,7 +1961,40 @@ const P = Project1
             # and often means a keyword never matches the amenity texts of this city
         end
     end
- 
+
+     @testset "run_prediction_pipeline" begin
+        # 1. the real pipeline once; a listing from the training data serves as the prepared apartment
+        df = P.run_training_pipeline().df
+        analysis = P.run_analysis_pipeline(df)
+        apartment = analysis.df_training[1:1, :]
+        # [1:1, :] keeps a DataFrame with one row, [1, :] would give a single row object instead
+
+        # 2. happy path: a listed apartment gets its range, its own price and one of the five statuses
+        listed = P.run_prediction_pipeline(analysis, apartment, :listed)
+        @test listed.price.lower <= listed.price.median <= listed.price.upper
+        @test listed.current_price == apartment.price[1]
+        @test listed.nights == apartment.estimated_occupancy_l365d[1]
+        @test listed.revenue.lower < listed.revenue.upper
+        @test listed.assessment.status in (:underpriced, :in_line, :not_price_problem, :overpriced, :unexplained_premium)
+
+        # 3. happy path: a new apartment gets no current price, no assessment and no revenue range
+        new = P.run_prediction_pipeline(analysis, apartment, :new)
+        @test new.current_price === nothing
+        @test new.assessment === nothing
+        @test new.revenue.lower === nothing
+        @test new.nights > 0
+
+        # 4. edge case: the bundle prints on the result screen, also with the empty tips tables
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("YOUR LISTING", output)
+        @test occursin("No missing amenity has a clear price effect.", output)
+
+        # 5. error case: a group that is not on the menu is rejected
+        @test_throws ArgumentError P.run_prediction_pipeline(analysis, apartment, :rental)
+    end
+
     @testset "run_analysis_pipeline" begin
         # - one fit and one score per entry of P.CONFIG.regression_models
         # - df_training and df_test together have as many rows as the input
