@@ -103,7 +103,7 @@ function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Sym
     # high is the occupancy that counts as "well booked" for comparable listings
 
     # 7. tips: empty tables in the final shape until amenity_effects and rating_effects are merged
-    # TODO: replace with amenity_effects and rating_effects
+    # TODO (#186): replace with amenity_effects and rating_effects
     tips = DataFrame(amenity = Symbol[], change = Float64[], change_pct = Float64[])
     rating_tips = DataFrame(score = Symbol[], pct_per_step = Float64[])
 
