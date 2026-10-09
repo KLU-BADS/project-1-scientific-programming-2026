@@ -2119,6 +2119,19 @@ const P = Project1
             # every status has its own message
         end
         # @testset ... for runs the same two tests once for every row of the list, each as its own small test set
+
+        # 12. happy path: the footer also names two limits of the numbers, for a listed and a new apartment
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("one random split", output)
+        # limit 2: the model scores depend on which listings landed in the test set
+        @test occursin("every answer is limited", output)
+        # limit 3: the answers are kept inside the data, because the model is only reliable there
+        io = IOBuffer()
+        P.visualize_results(new; io = io)
+        @test occursin("every answer is limited", String(take!(io)))
+        # a new apartment gets the same footer, the limits hold for every result screen
     end
 
     @testset "visualize_general_findings" begin
