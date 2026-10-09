@@ -58,10 +58,16 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
                     # offer to save the result screen as a text file
                     save = ask_yes_no("Save this result to a file? (y/n) "; io_in = io_in, io_out = io_out)
                     if save == true
-                        file = save_report(result, "hostwise_result.txt")
-                        println(io_out, "Saved to ", file)
+                        try
+                            file = save_report(result, joinpath(PROJECT_ROOT, "hostwise_result.txt"))
+                            println(io_out, "Saved to ", file)
+                        catch save_error
+                            save_error isa SystemError || rethrow()
+                            println(io_out, "Could not save the file: ", save_error.prefix)
+                        end
                     end
-                    # save == true also handles nothing (q), which simply saves nothing
+                    # PROJECT_ROOT is the project folder, so the file always ends up there, wherever Julia was started;
+                    # a file that cannot be written only skips the save, the program goes on
                 catch exception
                     # a wrong answer stops only this prediction; any other error is a bug, so it stops the program
                     exception isa ArgumentError || rethrow()
