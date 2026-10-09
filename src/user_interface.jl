@@ -454,3 +454,46 @@ function ask_numbers!(answers::AbstractDict{Symbol,Any}, rules::AbstractVector{<
     end
     return true
 end
+
+"""
+    ask_text(prompt; io_in = stdin, io_out = stdout) -> String or nothing
+
+Ask the user for a line of text, e.g. an address. Repeats the question until some text is entered.
+
+# Arguments
+- `prompt::AbstractString`:   question shown to the user.
+- `io_in::IO`:                input stream (default `stdin`); pass an `IOBuffer` in tests.
+- `io_out::IO`:               output stream for the prompt and messages (default `stdout`).
+
+Returns the entered text without spaces at the start and end, or `nothing` if the user enters
+`q`, `quit` or `exit` (not case-sensitive) or the input ends.
+
+# Examples
+```jldoctest
+julia> Project1.ask_text("Address: "; io_in = IOBuffer("  Ermou 10  \\n"), io_out = IOBuffer())
+"Ermou 10"
+
+julia> Project1.ask_text("Address: "; io_in = IOBuffer("q\\n"), io_out = IOBuffer()) === nothing
+true
+```
+"""
+function ask_text(prompt::AbstractString; io_in::IO = stdin, io_out::IO = stdout)
+    while true
+        # write the question and make sure it appears before the program waits for input
+        print(io_out, prompt)
+        flush(io_out)
+        # stop instead of looping forever if the input has ended
+        eof(io_in) && return nothing
+        # read one line and remove spaces and the line break at the start and end
+        text = strip(readline(io_in))
+        # an exit word leaves the question (compared in lower case, so "Exit" also works)
+        lowercase(text) in ("q", "quit", "exit") && return nothing
+        # an empty line is not an answer: ask again
+        if isempty(text)
+            println(io_out, "Please enter some text.")
+            continue
+        end
+        # strip gives a SubString; String(...) turns it into a normal String
+        return String(text)
+    end
+end
