@@ -1,18 +1,39 @@
 """
     run_training_pipeline(filepath = CONFIG.filepath) -> NamedTuple
 
-Run data pre-processing pipeline for the training data used in the regression model. Import the listings.csv 
-file into a DataFrame and run all pre-processing steps in the order of the design: select columns, rename, 
-set types, remove duplicates and listings without bookings, handle missing values, remove zero denominators 
-and outliers,  create dummies, ratios and the distance to the city center. Every step is controlled by `CONFIG`.
+Run the data pre-processing pipeline for the training data of the regression models. Import the listings file
+into a DataFrame and run every pre-processing step in the order of the design:
+
+1. select the relevant columns, rename the labels and set the column types;
+2. convert the prices into the city's currency;
+3. remove duplicates and listings without bookings;
+4. fill or remove missing values, then remove listings with a ratio denominator of 0;
+5. remove outliers and implausible values, then cap extreme values per room type;
+6. lower-case the text columns once, then create the dummy columns (see `text_columns_to_lower_case!`);
+7. calculate the ratios and the distance to the city center;
+8. group rare districts and add the squared columns.
+
+Every step is controlled by `CONFIG`.
+
+# Arguments
+- `filepath::String`:   path to the listings file (default `CONFIG.filepath`).
 
 Returns a named tuple `(df, fitted)`:
-- `df`: the processed listings as DataFrame.
-- `fitted`: the values learned from the training data, which the inference pipeline has to reuse on a single
+- `df`:     the processed listings as a DataFrame.
+- `fitted`: the values learned from the training data, which `run_inference_pipeline` reuses for a single
   apartment: `caps` (upper limits per room type), `kept_districts` (districts that are not grouped as rare)
   and `square_centers` (the centres of the squared columns).
 
-<!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
+# Examples
+```jldoctest
+julia> result = Project1.run_training_pipeline();
+
+julia> result.df isa DataFrame
+true
+
+julia> propertynames(result.fitted)
+(:caps, :kept_districts, :square_centers)
+```
 """
 function run_training_pipeline(filepath::String = CONFIG.filepath)
     df = import_csv(filepath)
@@ -31,6 +52,9 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
     remove_implausible!(df, CONFIG.plausibility_rules)
     caps = compute_caps(df, CONFIG.cap_rules)
     cap_values!(df, caps, CONFIG.cap_rules)
+    # prep dummy column for processing turning column text entries into lower case (formerly part of format_dummies!() with operation performed for every function call, 
+    # performance improvements: approx. -75% time (approx. 350 ms to 85 ms), approx. -90% memory usage (approx 330 MiB to 40 MiB))
+    text_columns_to_lower_case!(df, CONFIG.dummy_rules) 
     for rule in CONFIG.dummy_rules
         format_dummies!(df, rule)
     end

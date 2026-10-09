@@ -761,31 +761,90 @@ function cap_values!(df::DataFrame, caps::AbstractDict, rule::NamedTuple)
 end
 
 """
-    format_dummies!(df, rules)
+    text_columns_to_lower_case!(df, rules) -> DataFrame
 
-Create dummy variables for categorical columns according to the configured rules.
+Turn every text column that a dummy rule searches (`rule.source`) into lower case, once per column.
+
+`format_dummies!` searches these columns for lower-case keywords. It runs once per rule, and 11 rules search
+the same amenities column, so lower-casing inside `format_dummies!` copied that column 11 times. Lower-casing
+each column once here, before the dummy loop in `run_training_pipeline`, avoids those copies.
 
 # Arguments
-- `df::DataFrame`:      Input data frame.
-- `rules::NamedTuple`:  Contains the reference to source column `source` containing unformatted dummy variable,
-                        dummy variable name `target`, 
-                    
-                        (set of) keywords used in the listings.csv file `keywords`, and
-                        the optional flag `delete` to delete column after dummy conversion 
+- `df::DataFrame`:                          the listings table; changed in place.
+- `rules::AbstractVector{<:NamedTuple}`:    the dummy rules, e.g. `CONFIG.dummy_rules`; each rule has the field `source`.
 
-Returns the modified DataFrame in place.
+# Throws
+- `ArgumentError`   if a `source` column does not exist in `df`.
+- `MethodError`     if a `source` column does not contain text, e.g. numbers.
+
+Returns the same `df`, with every source column in lower case. All other columns stay unchanged.
+
+# Examples
+```jldoctest
+julia> df = DataFrame(amenities = ["Wifi, TV", "Kitchen"], room_type = ["Entire home/apt", "Private room"]);
+
+julia> rules = [(source = :amenities, target = :has_tv, keywords = ["tv"], delete = false)];
+
+julia> Project1.text_columns_to_lower_case!(df, rules).amenities
+2-element Vector{String}:
+ "wifi, tv"
+ "kitchen"
+```
+"""
+function text_columns_to_lower_case!(df::DataFrame, rules::AbstractVector{<:NamedTuple})
+    text_columns = unique([rule.source for rule in rules])
+    for column in text_columns
+        df[!, column] = lowercase.(df[!, column])
+    end
+    return df
+end
+
+"""
+    format_dummies!(df, rules) -> DataFrame
+
+Create a 0/1 dummy column from a text column: 1 if the text contains one of the rule's keywords, 0 if not.
+
+!!! warning "Lower-case text required"
+    The text is searched as it is, without converting it. Call `text_columns_to_lower_case!(df, CONFIG.dummy_rules)`
+    first, as `run_training_pipeline` does. Otherwise text with capitals (e.g. "Washer" in the listings file)
+    does not match the lower-case keywords, and the dummy column is 0 for these listings, without an error.
+
+# Arguments
+- `df::DataFrame`:      the listings table; changed in place.
+- `rules::NamedTuple`:  one dummy rule with the fields
+    - `source`:   the text column to search, e.g. `:amenities`;
+    - `target`:   the name of the new 0/1 column, e.g. `:has_washer`;
+    - `keywords`: the words to search for, in lower case; one match is enough for a 1;
+    - `delete`:   `true` to remove the source column afterwards (unless it is also the target).
+
+# Throws
+- `ArgumentError`   if a keyword contains capitals, because it could never match the lower-case text.
+
+Returns the same `df` with the new column; the dummies are whole numbers (`Int`).
+
+# Examples
+```jldoctest
+julia> df = DataFrame(amenities = ["TV, Wifi", "Kitchen"]);
+
+julia> rule = (source = :amenities, target = :has_tv, keywords = ["tv"], delete = false);
+
+julia> Project1.text_columns_to_lower_case!(df, [rule]);
+
+julia> Project1.format_dummies!(df, rule).has_tv
+2-element Vector{Int64}:
+ 1
+ 0
+```
 """
 function format_dummies!(df::DataFrame, rules::NamedTuple)
-        # 1. get text column we search in 
+    # the text is lower-cased before (text_columns_to_lower_case!), so a keyword with capitals could never match
+    all(word -> word == lowercase(word), rules.keywords) || throw(ArgumentError("keywords must be lower case, because the text is lower-cased before the search"))
+    # get text column we search in 
     texts = df[!,rules.source]
-    # this assigns all rows from the source columns (from dummy rules) from the dataframe to texts
-        # 2. lowercase everything
-    lower_texts = lowercase.(texts)
-    # creates a lowercased version of the texts variable
-        # 3. check if text contains keyword (boolean)
+    # check if text contains keyword (boolean)
     found_vector = Bool[]
     #creates a new list/vector for booleans which will be used to push true/false statements
-    for description in lower_texts
+    for description in texts
         found = false 
         #for loop for each listing, boolean found is used as a tracker to ensure that found statements are only entered into the array once 
         for word in rules.keywords
@@ -793,6 +852,7 @@ function format_dummies!(df::DataFrame, rules::NamedTuple)
             if occursin(word, description)
                 # if statement that looks if relevant words occur in each listing
                 found = true
+                break
                 # the boolean changes to true and ensures that each listing is pushed once per rule
                 # e.g.: if listing uses term washer and free washer, this boolean becomes true after first time, so length for each listing is correct (only once, not 2 because "washer" and "free washer" exists)
             end
@@ -800,19 +860,16 @@ function format_dummies!(df::DataFrame, rules::NamedTuple)
         push!(found_vector, found)
         #this pushes the true or false statements into a list and stores it for later use within the function
     end 
-        # 4. turn boolean into 1/0 (= true/false) + store this as new column
+    # turn boolean into 1/0 (= true/false) + store this as new column
     dummy_values = Int.(found_vector)
-        # converts every boolean in found_vector into respective dummy, i.e.: true = 1, false = 0 
+    # converts every boolean in found_vector into respective dummy, i.e.: true = 1, false = 0 
     df[!, rules.target] = dummy_values
     # all rows in column rule.target in dataframe are set equal to dummy values
-        # 5. delete original columns 
+    # delete original columns 
     if rules.delete == true && rules.source != rules.target
-        select!(df, Not(rules.source))
-        #select = says which columns to keep and Not says which ones to remove, so from df keep everything, but not rule.source
+        select!(df, Not(rules.source)) #select = says which columns to keep and Not says which ones to remove, so from df keep everything, but not rule.source
     end
-    # 6. return the table
     return df
-    # the docstring promises the modified DataFrame, so the pipeline can continue with it
 end
 
 """
