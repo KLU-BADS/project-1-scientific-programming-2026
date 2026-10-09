@@ -849,16 +849,65 @@ const P = Project1
         # a room type that was not in the training data cannot be capped
     end
 
+    @testset "text_columns_to_lower_case!" begin
+        # two rules on the same column and one on another, like the amenities and Superhost rules in CONFIG
+        rules = [(source = :amenities,    target = :has_tv,       keywords = ["tv"],     delete = false),
+                 (source = :amenities,    target = :has_washer,   keywords = ["washer"], delete = false),
+                 (source = :is_superhost, target = :is_superhost, keywords = ["t"],      delete = false)]
+        df = DataFrame(id = [1, 2],
+                       amenities = ["Wifi, TV", "Washer, Kitchen"],
+                       is_superhost = ["T", "f"],
+                       room_type = ["Entire home/apt", "Private room"])
+
+        result = P.text_columns_to_lower_case!(df, rules)
+
+        # every source column is lower case, also when two rules share it
+        @test df.amenities == ["wifi, tv", "washer, kitchen"]
+        @test df.is_superhost == ["t", "f"]
+
+        # columns that no rule searches stay unchanged
+        @test df.room_type == ["Entire home/apt", "Private room"]
+        @test df.id == [1, 2]
+
+        # the same table is returned, as from every other ! function
+        @test result === df
+
+        # lower-case text stays as it is, so calling it twice changes nothing
+        P.text_columns_to_lower_case!(df, rules)
+        @test df.amenities == ["wifi, tv", "washer, kitchen"]
+
+        # no rules: nothing changes
+        df_no_rules = DataFrame(amenities = ["Wifi"])
+        P.text_columns_to_lower_case!(df_no_rules, NamedTuple[])
+        @test df_no_rules.amenities == ["Wifi"]
+
+        # together with format_dummies!: capitalised text from the file is found again
+        washer_rule = only(filter(r -> r.target == :has_washer, P.CONFIG.dummy_rules))
+        df_raw = DataFrame(amenities = ["[\"Washer\", \"Wifi\"]", "[\"Dishwasher\"]"])
+        P.text_columns_to_lower_case!(df_raw, [washer_rule])
+        P.format_dummies!(df_raw, washer_rule)
+        @test df_raw.has_washer == [1, 0]
+
+        # a source column that does not exist is an error
+        @test_throws ArgumentError P.text_columns_to_lower_case!(DataFrame(id = [1]), rules)
+
+        # a source column without text is an error
+        @test_throws MethodError P.text_columns_to_lower_case!(DataFrame(amenities = [1, 2]), [rules[1]])
+    end
+
     @testset "format_dummies!" begin
         washer_rule = only(filter(r -> r.target == :has_washer, P.CONFIG.dummy_rules))
         pool_rule = only(filter(r -> r.target == :has_pool, P.CONFIG.dummy_rules))
         superhost_rule = only(filter(r -> r.target == :is_superhost, P.CONFIG.dummy_rules))
-       
-        df = DataFrame(amenities = ["[\"Washer\", \"Wifi\"]", "[\"Dishwasher\"]"])
+        
+        # format_dummies! expects lower-case text: the pipeline lower-cases it beforehand with
+        # text_columns_to_lower_case!, so the test text is lower case too
+        # (capitalised text from the file is tested together with text_columns_to_lower_case!)
+        df = DataFrame(amenities = ["[\"washer\", \"wifi\"]", "[\"dishwasher\"]"])
         P.format_dummies!(df, washer_rule)
         @test df.has_washer == [1, 0]
 
-        df = DataFrame(amenities = ["[\"Pool\"]", "[\"Pool table\"]"])
+        df = DataFrame(amenities = ["[\"pool\"]", "[\"pool table\"]"])
         P.format_dummies!(df, pool_rule)
         @test df.has_pool == [1, 0]
         @test eltype(df.has_pool) == Int
@@ -869,7 +918,7 @@ const P = Project1
         @test eltype(df.is_superhost) == Int
         
         washer_delete_rule = merge(washer_rule, (delete = true,))
-        df = DataFrame(id = [1, 2], amenities = ["[\"Washer\"]", "[\"Wifi\"]"])
+        df = DataFrame(id = [1, 2], amenities = ["[\"washer\"]", "[\"wifi\"]"])
         P.format_dummies!(df, washer_delete_rule)
         remaining_columns = names(df)
         @test "amenities" ∉ remaining_columns 
@@ -877,15 +926,12 @@ const P = Project1
         @test df.id == [1, 2]
 
         # returns the same table, as every other ! function (needed for the pipeline)
-        df = DataFrame(amenities = ["[\"Washer\", \"Wifi\"]"])
+        df = DataFrame(amenities = ["[\"washer\", \"wifi\"]"])
         out = P.format_dummies!(df, washer_rule)
         @test out === df
-        # === checks that the function returns the very same table, as promised in the docstring
-        # - "Washer" -> 1, "Dishwasher" -> 0 for has_washer; "Pool" -> 1, "Pool table" -> 0 for has_pool
-        # - the new column holds whole numbers (eltype Int)
-        # - is_superhost "t"/"f" becomes 1/0 in the same column
-        # - delete = true removes the source column
-        #@test_broken false
+
+        # a keyword with capitals is refused, because it could never match the lower-case text
+        @test_throws ArgumentError P.format_dummies!(DataFrame(amenities = ["[\"washer\"]"]), merge(washer_rule, (keywords = ["Washer"],)))
     end
  
     @testset "calculate_ratio!" begin
