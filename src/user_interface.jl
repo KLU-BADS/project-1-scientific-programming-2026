@@ -42,7 +42,7 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
             visualize_general_findings(analysis; io = io_out, importance = importance)
         else
             # 3. a new or a listed apartment: ask for its data, predict, and show the result screen
-            answers = enter_apartment_data(choice, analysis.df_training; io_in = io_in, io_out = io_out)
+            answers = enter_apartment_data(choice, analysis.df_training; center = CONFIG.cities[analysis.fitted.city].center, io_in = io_in, io_out = io_out)
             # choice is :new or :listed, so the questions match the group (a listed apartment also gets its price and nights)
             if isnothing(answers)
                 println(io_out, "Cancelled.")
@@ -73,7 +73,7 @@ end
 
 
 """
-    enter_apartment_data(group, df_training; io_in = stdin, io_out = stdout) -> Dict{Symbol,Any} or nothing
+    enter_apartment_data(group, df_training; center = CONFIG.cities[CONFIG.city].center, io_in = stdin, io_out = stdout) -> Dict{Symbol,Any} or nothing
 
 Ask the user every question about one apartment and collect the answers under their final column names,
 so they can be turned into a one-row table for the model. The questions, in this order:
@@ -89,6 +89,7 @@ so they can be turned into a one-row table for the model. The questions, in this
 # Arguments
 - `group::Symbol`:              `:new` for an apartment that is not listed yet, `:listed` for a listed one.
 - `df_training::DataFrame`:     training data, used for the menu options and the limits of every question.
+- `center::NamedTuple`:         centre of the chosen city (default the config city), used for the location check.
 - `io_in::IO`:                  input stream for the typed questions (default `stdin`).
 - `io_out::IO`:                 output stream for the prompts and messages (default `stdout`).
 
@@ -101,7 +102,7 @@ Returns a `Dict{Symbol,Any}` with the answers, or `nothing` as soon as the user 
 For listed apartments it also contains `:price` and `:estimated_occupancy_l365d`; the price is compared
 with the predicted range and is not a predictor.
 """
-function enter_apartment_data(group::Symbol, df_training::DataFrame; io_in::IO = stdin, io_out::IO = stdout)
+function enter_apartment_data(group::Symbol, df_training::DataFrame; center::NamedTuple = CONFIG.cities[CONFIG.city].center, io_in::IO = stdin, io_out::IO = stdout)
     # throw exception if group name is wrong
     group in (:new, :listed) || throw(ArgumentError("group must be :new or :listed"))
     
@@ -121,7 +122,7 @@ function enter_apartment_data(group::Symbol, df_training::DataFrame; io_in::IO =
     ask_numbers!(answers, size_rules, df_training, CONFIG.plausibility_rules; io_in = io_in, io_out = io_out) || return nothing
     
     # get location of apartment and derive district
-    location_input = ask_location(df_training, CONFIG.distance_rule, CONFIG.location_rule, CONFIG.cities[CONFIG.city].center; io_in = io_in, io_out = io_out)
+    location_input = ask_location(df_training, CONFIG.distance_rule, CONFIG.location_rule, center; io_in = io_in, io_out = io_out)
     isnothing(location_input) && return nothing
     answers[:latitude] = location_input.latitude
     answers[:longitude] = location_input.longitude
@@ -403,9 +404,9 @@ function ask_location(df_training::DataFrame, distance_rule::NamedTuple, locatio
     distance_max = maximum(df_training.proximity_city_center) + location_rule.distance_margin_km
     # get user input with min/max the extrema from the training data plus a small margin, if user exits return nothing
     while true
-        latitude_input = ask_number("Latitude (e.g. 37.968): ", Float64, latitude_min, latitude_max, true; io_in = io_in, io_out = io_out)
+        latitude_input = ask_number("Latitude (e.g. $(round(center.latitude; digits = 3))): ", Float64, latitude_min, latitude_max, true; io_in = io_in, io_out = io_out)
         isnothing(latitude_input) && return nothing
-        longitude_input = ask_number("Longitude (e.g. 23.727): ", Float64, longitude_min, longitude_max, true; io_in = io_in, io_out = io_out)
+        longitude_input = ask_number("Longitude (e.g. $(round(center.longitude; digits = 3))): ", Float64, longitude_min, longitude_max, true; io_in = io_in, io_out = io_out)
         isnothing(longitude_input) && return nothing
         # calculate distance to city center and verify validity of the input
         location = DataFrame(latitude = [latitude_input], longitude = [longitude_input])

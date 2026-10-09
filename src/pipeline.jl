@@ -206,7 +206,8 @@ function run_inference_pipeline(df_input::DataFrame, fitted::NamedTuple)
             end
         end
     end
-    calculate_distance!(df_inference, CONFIG.distance_rule, CONFIG.cities[CONFIG.city].center)
+    calculate_distance!(df_inference, CONFIG.distance_rule, CONFIG.cities[get(fitted, :city, CONFIG.city)].center)
+    # the centre of the city the models were trained on; get falls back to the config city if fitted has no city
     group_rare_categories!(df_inference, CONFIG.category_rule, fitted.kept_districts)
     for rule in CONFIG.square_rules
         calculate_square!(df_inference, rule, fitted.square_centers[rule.source])
