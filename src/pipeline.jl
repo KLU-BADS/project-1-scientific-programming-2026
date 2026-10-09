@@ -1,25 +1,29 @@
 """
-    run_training_pipeline(filepath = CONFIG.filepath) -> NamedTuple
+    run_training_pipeline(filepath = CONFIG.filepath; city = CONFIG.city) -> NamedTuple
 
 Run data pre-processing pipeline for the training data used in the regression model. Import the listings.csv 
 file into a DataFrame and run all pre-processing steps in the order of the design: select columns, rename, 
 set types, remove duplicates and listings without bookings, handle missing values, remove zero denominators 
 and outliers,  create dummies, ratios and the distance to the city center. Every step is controlled by `CONFIG`.
 
+# Arguments
+- `filepath::String`:   path of the listings file (default `CONFIG.filepath`), e.g. `data_filepath(city)`.
+- `city::String`:       keyword, the city of the file (default `CONFIG.city`); selects the currency and the city centre.
+
 Returns a named tuple `(df, fitted)`:
 - `df`: the processed listings as DataFrame.
 - `fitted`: the values learned from the training data, which the inference pipeline has to reuse on a single
-  apartment: `caps` (upper limits per room type), `kept_districts` (districts that are not grouped as rare)
-  and `square_centers` (the centres of the squared columns).
+  apartment: `caps` (upper limits per room type), `kept_districts` (districts that are not grouped as rare),
+  `square_centers` (the centres of the squared columns) and `city` (the city the data belongs to).
 
 <!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
 """
-function run_training_pipeline(filepath::String = CONFIG.filepath)
+function run_training_pipeline(filepath::String = CONFIG.filepath; city::String = CONFIG.city)
     df = import_csv(filepath)
     df = filter_columns(df, CONFIG.relevant_columns)
     format_labels!(df, CONFIG.label_mapping)
     set_types!(df, CONFIG.column_types)
-    convert_currency!(df, CONFIG.currency_rules, CONFIG.cities[CONFIG.city].currency)
+    convert_currency!(df, CONFIG.currency_rules, CONFIG.cities[city].currency)
     remove_duplicates!(df, CONFIG.deduplicate_columns)
     remove_if_zero!(df, CONFIG.no_booking_columns)
     process_missing!(df, CONFIG.missing_rules)
@@ -37,7 +41,7 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
     for rule in CONFIG.ratio_rules
         calculate_ratio!(df, rule)
     end
-    calculate_distance!(df, CONFIG.distance_rule, CONFIG.cities[CONFIG.city].center)
+    calculate_distance!(df, CONFIG.distance_rule, CONFIG.cities[city].center)
     kept = kept_categories(df, CONFIG.category_rule)
     group_rare_categories!(df, CONFIG.category_rule, kept)
     centers = Dict{Symbol,Float64}()
@@ -45,7 +49,8 @@ function run_training_pipeline(filepath::String = CONFIG.filepath)
         centers[rule.source] = square_center(df, rule)
         calculate_square!(df, rule, centers[rule.source])
     end
-    return (df = df, fitted = (caps = caps, kept_districts = kept, square_centers = centers))
+    return (df = df, fitted = (caps = caps, kept_districts = kept, square_centers = centers, city = city))
+    # the city is stored with the other learned values, so prediction later uses the same city centre
 end
 
 """
@@ -65,6 +70,11 @@ revenue, for a listed apartment the assessment of its current price, and the tip
 Returns the bundle for `visualize_results`: `group`, `level`, `price` (`median`, `mean`, `lower`, `upper`),
 `nights`, `revenue` (`estimate`, `lower`, `upper`), `current_price`, `assessment` (`status`, `difference`),
 `district`, `room_type`, `tips` and `rating_tips`.
+
+The tips come from `amenity_effects` on the `:price` model: the amenities of `CONFIG.actionable_amenities`
+the apartment does not have yet, with a significant effect of at least `CONFIG.min_effect_pct` percent.
+The rating tips come from `rating_effects` on the `:price_explain` model, the only model with the rating
+sub-scores, for the scores in `CONFIG.rating_tips`.
 
 # Examples
 No example here: the function needs the models fitted on the real listings, so its use is shown in the tests.
@@ -117,11 +127,14 @@ function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Sym
     end
     # high is the occupancy that counts as "well booked" for comparable listings
 
-    # 7. tips: empty tables in the final shape until amenity_effects and rating_effects are merged
-    # TODO (#186): replace with amenity_effects and rating_effects
-    tips = DataFrame(amenity = Symbol[], change = Float64[], change_pct = Float64[])
-    rating_tips = DataFrame(score = Symbol[], pct_per_step = Float64[])
-    # Symbol[] and Float64[] are empty columns of the right type, so visualize_results can read them already
+    # 7. tips: the missing amenities that would raise the price, and the ratings that pay off
+    tips = amenity_effects(fit, df, CONFIG.actionable_amenities;
+                           alpha = CONFIG.significance_level, min_effect_pct = CONFIG.min_effect_pct)
+    # only amenities the apartment does not have yet, with a significant effect of at least CONFIG.min_effect_pct percent
+    explain_fit = get_fit(analysis.fits, :price_explain)
+    rating_tips = rating_effects(explain_fit, CONFIG.rating_tips.columns;
+                                 step = CONFIG.rating_tips.step, alpha = CONFIG.significance_level)
+    # the rating sub-scores are only predictors of :price_explain, so the rating tips come from that model
 
     # 7b. the most similar listings of the training data, shown next to the price range
     comparables = comparable_listings(analysis.df_training, df, CONFIG.distance_rule)
@@ -197,7 +210,8 @@ function run_inference_pipeline(df_input::DataFrame, fitted::NamedTuple)
             end
         end
     end
-    calculate_distance!(df_inference, CONFIG.distance_rule, CONFIG.cities[CONFIG.city].center)
+    calculate_distance!(df_inference, CONFIG.distance_rule, CONFIG.cities[get(fitted, :city, CONFIG.city)].center)
+    # the centre of the city the models were trained on; get falls back to the config city if fitted has no city
     group_rare_categories!(df_inference, CONFIG.category_rule, fitted.kept_districts)
     for rule in CONFIG.square_rules
         calculate_square!(df_inference, rule, fitted.square_centers[rule.source])

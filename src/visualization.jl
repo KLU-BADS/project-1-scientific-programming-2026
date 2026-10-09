@@ -367,6 +367,9 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
     # 7. footer: the numbers describe comparable listings, they do not promise anything
     println(io, "Based on comparable listings, not a guarantee.")
     # the same sentence closes every result screen, for a new and a listed apartment
+    println(io, "  The model scores come from one random split; another split gives slightly different values.")
+    println(io, "  Predictions are only reliable for apartments like the listings, so every answer is limited.")
+    # the same two limits as on the findings screen: one random split, and answers kept inside the data
 
     return nothing
 end
@@ -375,8 +378,13 @@ end
     visualize_general_findings(analysis; io = stdout, importance = nothing)
 
 Print the market findings screen: the size and price level of the city's market, the price charts,
-how well the models predict, what drives the price, how close the predictions are on the test set,
-and the limits of these findings.
+how well the models predict, what drives the price, the detail lines, how close the predictions are
+on the test set, and the limits of these findings.
+
+The detail lines list the room type and the significant amenities of the `:price` model (from `term_effects`,
+with p-values below `CONFIG.significance_level`), each as an effect on the price in percent, and the rating
+effects per `CONFIG.rating_tips.step` points from the `:price_explain` model (from `rating_effects`).
+Without a `:price_explain` model the rating lines are left out.
 
 # Arguments
 - `analysis::NamedTuple`:   The result of `run_analysis_pipeline` with `fits`, `scores`, `df_training` and `df_test`.
@@ -433,16 +441,39 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, impor
     println(io)
     # group_importance fits the model again without every group, about a second, so main can pass the table in
 
-    # TODO (#187): the detail lines with term_effects and rating_effects come here
+    # 7. in detail: the room type and the significant amenities, then the ratings, each as an effect on the price
+    println(io, "In detail")
+    for row in eachrow(term_effects(fit))
+        # term_effects gives one row per term of the price model: its name, its effect in percent and its p-value
+        is_room_type = startswith(row.term, "room_type: ")
+        is_amenity = haskey(CONFIG.amenity_labels, Symbol(row.term))
+        # sizes and districts are already in the chart above, so only these two kinds of terms are listed
+        (is_room_type || (is_amenity && row.pvalue < CONFIG.significance_level)) || continue
+        # a || b only runs b when a is false, so every other term is skipped with continue
+        label = is_amenity ? lowercase(CONFIG.amenity_labels[Symbol(row.term)]) : get(CONFIG.term_labels, row.term, row.term)
+        # get gives back the readable label, or the term itself if CONFIG.term_labels has none for it
+        println(io, "  ", rpad(label, 40), @sprintf("%+.0f%%", row.pct))
+        # rpad fills the label with spaces up to 40 characters, so the effects form one column; %+ always shows the sign
+    end
+    if any(model -> model.spec.name == :price_explain, analysis.fits)
+        explain_fit = get_fit(analysis.fits, :price_explain)
+        step = CONFIG.rating_tips.step
+        for row in eachrow(rating_effects(explain_fit, CONFIG.rating_tips.columns; step = step, alpha = CONFIG.significance_level))
+            label = get(CONFIG.term_labels, String(row.score), String(row.score))
+            println(io, "  ", rpad("$label, per $step point", 40), @sprintf("%+.1f%%", row.pct_per_step))
+        end
+    end
+    # the rating sub-scores are only in the :price_explain model, so without it no rating line is printed
+    println(io)
 
-    # 7. how close the predictions are: the predicted against the real price of every test listing
+    # 8. how close the predictions are: the predicted against the real price of every test listing
     predicted = predict_apartment_performance(fit, analysis.df_test)
     # the price model predicts every test listing, none of which it saw while it was fitted
     plot_predicted_vs_actual(Float64.(analysis.df_test.price), predicted; io = io)
     println(io)
     # Float64.() turns the CSV column into plain numbers, like in the price plots; the cleaned prices have no empty cells
 
-    # 8. footer: what the numbers cannot tell, so nobody reads them as exact
+    # 9. footer: what the numbers cannot tell, so nobody reads them as exact
     println(io, "Limits of these findings")
     println(io, "  Occupancy is an estimate from reviews, not real bookings.")
     println(io, "  The model scores come from one random split; another split gives slightly different values.")
