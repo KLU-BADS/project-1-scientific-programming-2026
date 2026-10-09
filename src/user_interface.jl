@@ -50,7 +50,7 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
             while !isnothing(answers)
                 confirmed = confirm_answers(answers; io_in = io_in, io_out = io_out)
                 confirmed === true && break
-                answers = confirmed === false ? enter_apartment_data(choice, analysis.df_training; io_in = io_in, io_out = io_out) : nothing
+                answers = confirmed === false ? enter_apartment_data(choice, analysis.df_training; center = CONFIG.cities[analysis.fitted.city].center, io_in = io_in, io_out = io_out) : nothing
             end
             # === compares exactly, so nothing (q) is neither true nor false and cancels
             if isnothing(answers)
