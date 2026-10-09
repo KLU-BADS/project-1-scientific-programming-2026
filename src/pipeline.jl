@@ -136,11 +136,15 @@ function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Sym
                                  step = CONFIG.rating_tips.step, alpha = CONFIG.significance_level)
     # the rating sub-scores are only predictors of :price_explain, so the rating tips come from that model
 
+    # 7b. the most similar listings of the training data, shown next to the price range
+    comparables = comparable_listings(analysis.df_training, df, CONFIG.distance_rule)
+    # same room type and bedrooms, the nearest first; df still has latitude and longitude (delete = false)
+    
     # 8. one bundle with every number of the screen
     # the field names are exactly the ones visualize_results reads
     return (group = group, level = CONFIG.interval_level, price = price, nights = nights, revenue = revenue,
             current_price = current_price, assessment = assessment, district = district,
-            room_type = room_type, tips = tips, rating_tips = rating_tips)
+            room_type = room_type, tips = tips, rating_tips = rating_tips, comparables = comparables)
 end
 
 """
