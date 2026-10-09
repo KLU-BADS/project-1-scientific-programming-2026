@@ -2119,6 +2119,19 @@ const P = Project1
             # every status has its own message
         end
         # @testset ... for runs the same two tests once for every row of the list, each as its own small test set
+
+        # 12. happy path: the footer also names two limits of the numbers, for a listed and a new apartment
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test occursin("one random split", output)
+        # limit 2: the model scores depend on which listings landed in the test set
+        @test occursin("every answer is limited", output)
+        # limit 3: the answers are kept inside the data, because the model is only reliable there
+        io = IOBuffer()
+        P.visualize_results(new; io = io)
+        @test occursin("every answer is limited", String(take!(io)))
+        # a new apartment gets the same footer, the limits hold for every result screen
     end
 
     @testset "visualize_general_findings" begin
@@ -2207,6 +2220,30 @@ const P = Project1
         # limit 3: the input is restricted because extreme answers break the predictions
         @test occursin("Amenity effects are correlations", output)
         # limit 4: an amenity effect is not a promise that adding it raises the price
+
+        # 8. happy path: the detail lines show the room type, the significant amenities and the rating effects
+        @test occursin("In detail", output)
+        # the made-up market gets the heading too, even when none of its terms is a room type or an amenity
+        @test !occursin("per $(P.CONFIG.rating_tips.step) point", output)
+        # the made-up analysis has no :price_explain model, so no rating line is printed
+        @test occursin("In detail", real_output)
+        # the heading is on the real screen as well
+        @test occursin("private room instead of entire home", real_output)
+        # the private room term of the real price model gets its label from CONFIG.term_labels
+        price_fit = P.get_fit(real_analysis.fits, :price)
+        for row in eachrow(P.term_effects(price_fit))
+            amenity = Symbol(row.term)
+            if haskey(P.CONFIG.amenity_labels, amenity) && row.pvalue < P.CONFIG.significance_level
+                @test occursin(lowercase(P.CONFIG.amenity_labels[amenity]), real_output)
+            end
+        end
+        # every significant amenity of the real price model has a line with its readable name
+        explain_fit = P.get_fit(real_analysis.fits, :price_explain)
+        step = P.CONFIG.rating_tips.step
+        for row in eachrow(P.rating_effects(explain_fit, P.CONFIG.rating_tips.columns; step = step, alpha = P.CONFIG.significance_level))
+            @test occursin("$(P.CONFIG.term_labels[String(row.score)]), per $step point", real_output)
+        end
+        # every rating that raises the price gets a line with its effect per rating step
     end
 
     # ------------------------------------------------------------------------------------------
@@ -2341,6 +2378,34 @@ const P = Project1
         # 5. error case: a group that is not on the menu is rejected
         @test_throws ArgumentError P.run_prediction_pipeline(analysis, apartment, :rental)
         # only :listed and :new exist, anything else stops before any work is done
+
+        # 6. happy path: the tips come from the real models and only suggest what the apartment can still gain
+        bare = copy(apartment)
+        for amenity in P.CONFIG.actionable_amenities
+            bare[1, amenity] = 0
+        end
+        # the same listing without any actionable amenity, so it always has something to gain
+        bare_result = P.run_prediction_pipeline(analysis, bare, :listed)
+        @test !isempty(bare_result.tips)
+        # several amenities have a significant effect in the real data, so the tips cannot be empty here
+        @test all(amenity -> amenity in P.CONFIG.actionable_amenities, bare_result.tips.amenity)
+        # only amenities a host can add are suggested
+        @test names(listed.tips) == ["amenity", "change", "change_pct"]
+        # amenity_effects gives the three columns visualize_results reads
+        @test all(amenity -> apartment[1, amenity] == 0, listed.tips.amenity)
+        # every amenity tip is one the apartment does not have yet
+        @test all(bare_result.tips.change .> 0)
+        # every amenity tip raises the price; bare_result is used so the check runs on real rows
+        @test all(bare_result.tips.change_pct .>= P.CONFIG.min_effect_pct)
+        # effects smaller than CONFIG.min_effect_pct are left out
+        @test names(listed.rating_tips) == ["score", "pct_per_step"]
+        # rating_effects gives the score and its effect per step
+        @test all(score -> score in P.CONFIG.rating_tips.columns, listed.rating_tips.score)
+        # only the scores chosen in CONFIG.rating_tips can become a tip
+        @test all(listed.rating_tips.pct_per_step .> 0)
+        # rating_effects keeps only scores whose higher rating raises the price
+        @test new.tips == listed.tips
+        # the tips depend on the apartment and the models only, not on whether it is new or listed
     end
 
     @testset "run_analysis_pipeline" begin
