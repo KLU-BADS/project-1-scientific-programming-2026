@@ -127,6 +127,10 @@ function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Sym
     end
     # high is the occupancy that counts as "well booked" for comparable listings
 
+    # 6b. the Superhost tip: how much more a host who is not a Superhost could charge as one
+    superhost = superhost_tip(fit, Int(df.is_superhost[1]); alpha = CONFIG.significance_level)
+    # fit is the price model from step 2; nothing means there is no tip
+
     # 7. tips: the missing amenities that would raise the price, and the ratings that pay off
     tips = amenity_effects(fit, df, CONFIG.actionable_amenities;
                            alpha = CONFIG.significance_level, min_effect_pct = CONFIG.min_effect_pct)
@@ -143,6 +147,7 @@ function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Sym
     # 8. one bundle with every number of the screen
     # the field names are exactly the ones visualize_results reads
     return (group = group, level = CONFIG.interval_level, price = price, nights = nights, revenue = revenue,
+            superhost = superhost,
             current_price = current_price, assessment = assessment, district = district,
             room_type = room_type, tips = tips, rating_tips = rating_tips, comparables = comparables)
 end
