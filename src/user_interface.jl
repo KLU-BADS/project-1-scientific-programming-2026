@@ -27,10 +27,12 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
     # the menu repeats until the user chooses Exit, which ends the function with return
     while true
         # 1. the main menu; ask_choice adds Exit itself and gives back nothing for it
-        choice = ask_choice("What would you like to do?", ["Market findings" => :findings, "Price a new apartment" => :new, "Check my listed apartment" => :listed])
+        choice = ask_choice("What would you like to do?", ["Market findings" => :findings, "Price a new apartment" => :new, "Check my listed apartment" => :listed, "Change city" => :change_city])
         # every option is a pair "label" => value: the user sees the label, the program gets the Symbol
         isnothing(choice) && return nothing
         # a && b only runs b when a is true, so Exit (or q) leaves the loop and the whole function
+        choice == :change_city && return :change_city
+        # main shows the city menu again when gui gives back :change_city
 
         # 2. the market findings, with the importance table computed once and reused on every later visit
         if choice == :findings
