@@ -27,10 +27,12 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
     # the menu repeats until the user chooses Exit, which ends the function with return
     while true
         # 1. the main menu; ask_choice adds Exit itself and gives back nothing for it
-        choice = ask_choice("What would you like to do?", ["Market findings" => :findings, "Price a new apartment" => :new, "Check my listed apartment" => :listed])
+        choice = ask_choice("What would you like to do?", ["Market findings" => :findings, "Price a new apartment" => :new, "Check my listed apartment" => :listed, "Change city" => :change_city])
         # every option is a pair "label" => value: the user sees the label, the program gets the Symbol
         isnothing(choice) && return nothing
         # a && b only runs b when a is true, so Exit (or q) leaves the loop and the whole function
+        choice == :change_city && return :change_city
+        # main shows the city menu again when gui gives back :change_city
 
         # 2. the market findings, with the importance table computed once and reused on every later visit
         if choice == :findings
@@ -42,8 +44,15 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
             visualize_general_findings(analysis; io = io_out, importance = importance)
         else
             # 3. a new or a listed apartment: ask for its data, predict, and show the result screen
-            answers = enter_apartment_data(choice, analysis.df_training; io_in = io_in, io_out = io_out)
+            answers = enter_apartment_data(choice, analysis.df_training; center = CONFIG.cities[analysis.fitted.city].center, io_in = io_in, io_out = io_out)
             # choice is :new or :listed, so the questions match the group (a listed apartment also gets its price and nights)
+            # let the user check the answers; "no" asks every question again, q cancels
+            while !isnothing(answers)
+                confirmed = confirm_answers(answers; io_in = io_in, io_out = io_out)
+                confirmed === true && break
+                answers = confirmed === false ? enter_apartment_data(choice, analysis.df_training; center = CONFIG.cities[analysis.fitted.city].center, io_in = io_in, io_out = io_out) : nothing
+            end
+            # === compares exactly, so nothing (q) is neither true nor false and cancels
             if isnothing(answers)
                 println(io_out, "Cancelled.")
             else
@@ -53,6 +62,19 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
                     result = run_prediction_pipeline(analysis, df, choice)
                     # the price range, revenue, assessment and tips of this one apartment
                     visualize_results(result; io = io_out)
+                    # offer to save the result screen as a text file
+                    save = ask_yes_no("Save this result to a file? (y/n) "; io_in = io_in, io_out = io_out)
+                    if save == true
+                        try
+                            file = save_report(result, joinpath(PROJECT_ROOT, "hostwise_result.txt"))
+                            println(io_out, "Saved to ", file)
+                        catch save_error
+                            save_error isa SystemError || rethrow()
+                            println(io_out, "Could not save the file: ", save_error.prefix)
+                        end
+                    end
+                    # PROJECT_ROOT is the project folder, so the file always ends up there, wherever Julia was started;
+                    # a file that cannot be written only skips the save, the program goes on
                 catch exception
                     # a wrong answer stops only this prediction; any other error is a bug, so it stops the program
                     exception isa ArgumentError || rethrow()
@@ -73,7 +95,7 @@ end
 
 
 """
-    enter_apartment_data(group, df_training; io_in = stdin, io_out = stdout) -> Dict{Symbol,Any} or nothing
+    enter_apartment_data(group, df_training; center = CONFIG.cities[CONFIG.city].center, io_in = stdin, io_out = stdout) -> Dict{Symbol,Any} or nothing
 
 Ask the user every question about one apartment and collect the answers under their final column names,
 so they can be turned into a one-row table for the model. The questions, in this order:
@@ -89,6 +111,7 @@ so they can be turned into a one-row table for the model. The questions, in this
 # Arguments
 - `group::Symbol`:              `:new` for an apartment that is not listed yet, `:listed` for a listed one.
 - `df_training::DataFrame`:     training data, used for the menu options and the limits of every question.
+- `center::NamedTuple`:         centre of the chosen city (default the config city), used for the location check.
 - `io_in::IO`:                  input stream for the typed questions (default `stdin`).
 - `io_out::IO`:                 output stream for the prompts and messages (default `stdout`).
 
@@ -101,7 +124,7 @@ Returns a `Dict{Symbol,Any}` with the answers, or `nothing` as soon as the user 
 For listed apartments it also contains `:price` and `:estimated_occupancy_l365d`; the price is compared
 with the predicted range and is not a predictor.
 """
-function enter_apartment_data(group::Symbol, df_training::DataFrame; io_in::IO = stdin, io_out::IO = stdout)
+function enter_apartment_data(group::Symbol, df_training::DataFrame; center::NamedTuple = CONFIG.cities[CONFIG.city].center, io_in::IO = stdin, io_out::IO = stdout)
     # throw exception if group name is wrong
     group in (:new, :listed) || throw(ArgumentError("group must be :new or :listed"))
     
@@ -121,7 +144,7 @@ function enter_apartment_data(group::Symbol, df_training::DataFrame; io_in::IO =
     ask_numbers!(answers, size_rules, df_training, CONFIG.plausibility_rules; io_in = io_in, io_out = io_out) || return nothing
     
     # get location of apartment and derive district
-    location_input = ask_location(df_training, CONFIG.distance_rule, CONFIG.location_rule, CONFIG.cities[CONFIG.city].center; io_in = io_in, io_out = io_out)
+    location_input = ask_location(df_training, CONFIG.distance_rule, CONFIG.location_rule, center; io_in = io_in, io_out = io_out)
     isnothing(location_input) && return nothing
     answers[:latitude] = location_input.latitude
     answers[:longitude] = location_input.longitude
@@ -146,6 +169,30 @@ function enter_apartment_data(group::Symbol, df_training::DataFrame; io_in::IO =
         ask_numbers!(answers, listed_rules, df_training, CONFIG.plausibility_rules; io_in = io_in, io_out = io_out) || return nothing
     end
     return answers
+end
+
+"""
+    confirm_answers(answers; io_in = stdin, io_out = stdout) -> Union{Bool, Nothing}
+
+Show every answer about the apartment and ask whether they are correct, before the prediction starts.
+
+# Arguments
+- `answers::AbstractDict{Symbol,Any}`:  the answers from `enter_apartment_data`.
+- `io_in::IO`:                          input stream (default `stdin`); pass an `IOBuffer` in tests.
+- `io_out::IO`:                         output stream for the summary and the question (default `stdout`).
+
+Returns `true` if the answers are correct, `false` if they should be entered again,
+or `nothing` if the user enters `q`, `quit` or `exit`.
+"""
+function confirm_answers(answers::AbstractDict{Symbol,Any}; io_in::IO = stdin, io_out::IO = stdout)
+    # 1. one line per answer, sorted by name so the order is always the same
+    println(io_out, "Your answers:")
+    for key in sort(collect(keys(answers)))
+        println(io_out, "  ", key, ": ", answers[key])
+    end
+    # collect turns the keys into a list that sort can order; Symbols are sorted alphabetically
+    # 2. ask whether everything is correct
+    return ask_yes_no("Are these answers correct? (y/n) "; io_in = io_in, io_out = io_out)
 end
 
 """
@@ -403,9 +450,9 @@ function ask_location(df_training::DataFrame, distance_rule::NamedTuple, locatio
     distance_max = maximum(df_training.proximity_city_center) + location_rule.distance_margin_km
     # get user input with min/max the extrema from the training data plus a small margin, if user exits return nothing
     while true
-        latitude_input = ask_number("Latitude (e.g. 37.968): ", Float64, latitude_min, latitude_max, true; io_in = io_in, io_out = io_out)
+        latitude_input = ask_number("Latitude (e.g. $(round(center.latitude; digits = 3))): ", Float64, latitude_min, latitude_max, true; io_in = io_in, io_out = io_out)
         isnothing(latitude_input) && return nothing
-        longitude_input = ask_number("Longitude (e.g. 23.727): ", Float64, longitude_min, longitude_max, true; io_in = io_in, io_out = io_out)
+        longitude_input = ask_number("Longitude (e.g. $(round(center.longitude; digits = 3))): ", Float64, longitude_min, longitude_max, true; io_in = io_in, io_out = io_out)
         isnothing(longitude_input) && return nothing
         # calculate distance to city center and verify validity of the input
         location = DataFrame(latitude = [latitude_input], longitude = [longitude_input])

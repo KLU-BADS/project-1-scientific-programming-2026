@@ -13,3 +13,6 @@ Manifest.toml
 # Editors / OS
 .vscode/
 .DS_Store
+
+# Program output
+hostwise_result.txt
