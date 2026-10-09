@@ -2261,8 +2261,10 @@ const P = Project1
         # df is the cleaned table; all checks below use it, so the pipeline runs only once and every check sees the same result
         @test df isa DataFrame
         # the table is a normal DataFrame
-        @test keys(result.fitted) == (:caps, :kept_districts, :square_centers)
-        # keys(...) lists the names inside fitted, in this order; prediction later reads exactly these three values
+        @test keys(result.fitted) == (:caps, :kept_districts, :square_centers, :city)
+        # keys(...) lists the names inside fitted, in this order; prediction later reads exactly these four values
+        @test result.fitted.city == P.CONFIG.city
+        # without a city argument the pipeline uses the city of the config
         @test result.fitted.caps isa AbstractDict
         @test result.fitted.kept_districts isa Vector{String}
         @test result.fitted.square_centers isa AbstractDict
