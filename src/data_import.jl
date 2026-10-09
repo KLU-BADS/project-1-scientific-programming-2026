@@ -101,3 +101,29 @@ function data_filepath(city::AbstractString; data_dir::AbstractString = joinpath
     return joinpath(data_dir, file_name)
     # joinpath adds the right separator (/ on macOS), so the path works on every system
 end
+
+"""
+    available_cities(cities, data_dir) -> Vector{String}
+
+Return the cities of `cities` that have a listings file in `data_dir`, so the city menu only offers
+cities the program can load.
+
+# Arguments
+- `cities::AbstractDict`:       the known cities, e.g. `CONFIG.cities`; only the keys (city names) are used.
+- `data_dir::AbstractString`:   folder of the listings files, e.g. `joinpath(PROJECT_ROOT, "data", "raw")`.
+
+Returns the city names sorted alphabetically, or an empty list if no city has a file.
+
+# Examples
+```julia
+available_cities(CONFIG.cities, joinpath(PROJECT_ROOT, "data", "raw"))   # ["Athens"]
+```
+"""
+function available_cities(cities::AbstractDict, data_dir::AbstractString)
+    # 1. keep every city whose listings file exists in the folder
+    found = [city for city in keys(cities) if isfile(data_filepath(city; data_dir = data_dir))]
+    # keys(cities) are the city names; isfile is true only if the file is really there
+    # 2. sort the names, so the menu always shows them in the same order
+    return sort(found)
+    # a Dict has no fixed order, so without sort the menu order could change between runs
+end
