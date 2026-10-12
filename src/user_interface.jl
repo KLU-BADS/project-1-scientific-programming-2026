@@ -3,8 +3,8 @@ using REPL.TerminalMenus
 """
     gui(analysis; io_in = stdin, io_out = stdout)
 
-Run the terminal menu of the program until the user chooses Exit: show the market findings,
-price a new apartment or check a listed one.
+Run the terminal menu of the program until the user chooses Exit or Change city: show the market findings,
+price a new apartment, check a listed one, or go back to the city selection.
 
 # Arguments
 - `analysis::NamedTuple`:   The result of `run_analysis_pipeline` together with `fitted` from `run_training_pipeline`.
@@ -14,7 +14,8 @@ price a new apartment or check a listed one.
 # Throws
 - Every error except an `ArgumentError` from the input is passed on unchanged.
 
-Returns `nothing` once the user chooses Exit.
+Returns `nothing` once the user chooses Exit, or `:change_city` if the user wants to choose another city;
+`main` then shows the city menu again.
 
 # Examples
 No example here: the menus need a real keyboard, so gui is tested by hand in the terminal.
@@ -24,7 +25,7 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
     importance = nothing
     # nothing means "not computed yet"; the findings screen fills it in the first time it is opened
 
-    # the menu repeats until the user chooses Exit, which ends the function with return
+    # the menu repeats until the user chooses Exit or Change city, which both end the function with return
     while true
         # 1. the main menu; ask_choice adds Exit itself and gives back nothing for it
         choice = ask_choice("What would you like to do?", ["Market findings" => :findings, "Price a new apartment" => :new, "Check my listed apartment" => :listed, "Change city" => :change_city])

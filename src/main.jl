@@ -10,15 +10,17 @@ using Project1
 """
     main()
 
-Run the HostWise program: prepare the data, fit the models and open the menu in the terminal.
+Run the HostWise program: choose a city, prepare its data, fit the models and open the menu in the terminal.
+The steps repeat until the user leaves the city menu or chooses "Exit" in the main menu.
 
 1. The user chooses the city among the cities with a listings file in `data/raw` (`available_cities`);
    with only one city there is no question, and Exit ends the program.
 2. `run_training_pipeline(data_filepath(city); city = city)` imports and prepares the listings of that city
    and keeps the values learned from them (`fitted`: caps, kept districts, square centres, city).
 3. `run_analysis_pipeline(df)` splits the data into a training and a test set and fits and scores the models.
-4. `gui(...)` opens the main menu with the analysis and `fitted`; the program ends when the user chooses "Exit".
-
+4. `gui(...)` opens the main menu with the analysis and `fitted`. If the user chooses "Change city",
+   `gui` gives back `:change_city` and the program starts again at step 1; "Exit" ends the program.
+   
 Start it from a terminal with `julia src/main.jl`: the menus need a real terminal.
 
 Returns `nothing`.
