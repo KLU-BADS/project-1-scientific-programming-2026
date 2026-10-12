@@ -48,7 +48,7 @@ function gui(analysis::NamedTuple; io_in::IO = stdin, io_out::IO = stdout)
             # choice is :new or :listed, so the questions match the group (a listed apartment also gets its price and nights)
             # let the user check the answers; "no" asks every question again, q cancels
             while !isnothing(answers)
-                confirmed = confirm_answers(answers; io_in = io_in, io_out = io_out)
+                confirmed = confirm_answers(answers; group = choice, io_in = io_in, io_out = io_out)
                 confirmed === true && break
                 answers = confirmed === false ? enter_apartment_data(choice, analysis.df_training; center = CONFIG.cities[analysis.fitted.city].center, io_in = io_in, io_out = io_out) : nothing
             end
@@ -172,26 +172,60 @@ function enter_apartment_data(group::Symbol, df_training::DataFrame; center::Nam
 end
 
 """
-    confirm_answers(answers; io_in = stdin, io_out = stdout) -> Union{Bool, Nothing}
+    confirm_answers(answers; group = :new, io_in = stdin, io_out = stdout) -> Union{Bool, Nothing}
 
-Show every answer about the apartment and ask whether they are correct, before the prediction starts.
+Show every answer about the apartment in the order the questions were asked, with the labels of the questions,
+and ask whether they are correct, before the prediction starts.
 
 # Arguments
 - `answers::AbstractDict{Symbol,Any}`:  the answers from `enter_apartment_data`.
+- `group::Symbol`:                      `:new` or `:listed` (default `:new`); only the questions of this group are shown,
+                                        so a new apartment does not show the median rating it was never asked for.
 - `io_in::IO`:                          input stream (default `stdin`); pass an `IOBuffer` in tests.
 - `io_out::IO`:                         output stream for the summary and the question (default `stdout`).
 
+# Throws
+- `ArgumentError`   if `group` is not `:new` or `:listed`.
+
 Returns `true` if the answers are correct, `false` if they should be entered again,
-or `nothing` if the user enters `q`, `quit` or `exit`.
+or `nothing` if the user enters `q`, `quit` or `exit` or the input ends.
 """
-function confirm_answers(answers::AbstractDict{Symbol,Any}; io_in::IO = stdin, io_out::IO = stdout)
-    # 1. one line per answer, sorted by name so the order is always the same
+function confirm_answers(answers::AbstractDict{Symbol,Any}; group::Symbol = :new, io_in::IO = stdin, io_out::IO = stdout)
+    # 1. only the two groups of the menu are allowed
+    group in (:new, :listed) || throw(ArgumentError("group must be :new or :listed"))
+
+    # 2. the room type, the first question
     println(io_out, "Your answers:")
-    for key in sort(collect(keys(answers)))
-        println(io_out, "  ", key, ": ", answers[key])
+    println(io_out, "  Room type: ", answers[:room_type])
+
+    # 3. the size questions, labelled with their own prompt
+    size_rules = filter(rule -> :new in rule.groups, CONFIG.input_rules)
+    for rule in size_rules
+        println(io_out, "  ", rstrip(rule.prompt, [':', ' ']), ": ", answers[rule.column])
     end
-    # collect turns the keys into a list that sort can order; Symbols are sorted alphabetically
-    # 2. ask whether everything is correct
+    # the same filter as in enter_apartment_data; rstrip removes ": " at the end, "Maximum number of guests: " becomes the label
+
+    # 4. the location and the district derived from it
+    println(io_out, "  Location: ", answers[:latitude], ", ", answers[:longitude], " (", answers[:district], ")")
+
+    # 5. the ticked amenities by their label, or none
+    ticked = [CONFIG.amenity_labels[amenity] for amenity in get_amenity_columns(CONFIG.dummy_rules) if get(answers, amenity, 0) == 1]
+    println(io_out, "  Amenities: ", isempty(ticked) ? "none" : join(ticked, ", "))
+    # join puts ", " between the labels; get gives 0 for an amenity that is missing in the answers
+
+    # 6. Superhost as yes or no instead of 1 or 0
+    println(io_out, "  Superhost: ", answers[:is_superhost] == 1 ? "yes" : "no")
+
+    # 7. listed apartments only: price, rating and booked nights, asked last
+    if group == :listed
+        listed_rules = filter(rule -> !(:new in rule.groups), CONFIG.input_rules)
+        for rule in listed_rules
+            println(io_out, "  ", rstrip(rule.prompt, [':', ' ']), ": ", answers[rule.column])
+        end
+    end
+    # a new apartment gets the median rating without a question, so it is not shown
+
+    # 8. ask whether everything is correct
     return ask_yes_no("Are these answers correct? (y/n) "; io_in = io_in, io_out = io_out)
 end
 
