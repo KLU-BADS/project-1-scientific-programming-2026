@@ -2536,6 +2536,60 @@ const P = Project1
         @test_throws MethodError P.enter_apartment_data("new", DataFrame())
     end
 
+    @testset "confirm_answers" begin
+        # the answers of one new apartment, as enter_apartment_data collects them
+        answers = Dict{Symbol,Any}(:room_type => "Entire home/apt", :accommodates => 2, :bedrooms => 1, :beds => 1,
+                                   :bathrooms => 1.0, :minimum_nights => 2, :latitude => 37.97, :longitude => 23.73,
+                                   :district => "Plaka", :is_superhost => 0, :review_scores_rating => 4.8)
+        for amenity in P.AMENITIES
+            answers[amenity] = 0
+        end
+        answers[:has_AC] = 1
+        # every amenity is a 0/1 answer; only air conditioning is ticked
+
+        # 1. happy path: y confirms, and the summary uses the labels of the questions instead of the column names
+        io = IOBuffer()
+        @test P.confirm_answers(answers; group = :new, io_in = IOBuffer("y\n"), io_out = io) === true
+        output = String(take!(io))
+        # === compares exactly, so only the value true passes, not 1
+        @test occursin("Room type: Entire home/apt", output)
+        @test occursin("Maximum number of guests: 2", output)
+        # the label is the prompt of the question in CONFIG.input_rules without the ": " at its end
+        @test occursin("Location: 37.97, 23.73 (Plaka)", output)
+        @test occursin("Amenities: Air conditioning", output)
+        @test occursin("Superhost: no", output)
+        @test !occursin("has_AC", output) && !occursin("is_superhost", output)
+        # the column names are not shown anymore
+
+        # 2. happy path: a new apartment does not show the median rating it was never asked for
+        @test !occursin("rating", output)
+
+        # 3. happy path: a listed apartment also shows its price, rating and booked nights
+        listed = merge(answers, Dict{Symbol,Any}(:price => 80.0, :estimated_occupancy_l365d => 50))
+        io = IOBuffer()
+        P.confirm_answers(listed; group = :listed, io_in = IOBuffer("y\n"), io_out = io)
+        output = String(take!(io))
+        @test occursin("Your current price per night (EUR): 80.0", output)
+        @test occursin("Your average rating (1 to 5): 4.8", output)
+        @test occursin("Nights booked in the last 12 months: 50", output)
+        # merge gives back a new Dict with the extra answers, answers itself is not changed
+
+        # 4. edge case: no amenity ticked
+        no_amenities = merge(answers, Dict{Symbol,Any}(:has_AC => 0))
+        io = IOBuffer()
+        P.confirm_answers(no_amenities; group = :new, io_in = IOBuffer("y\n"), io_out = io)
+        @test occursin("Amenities: none", String(take!(io)))
+
+        # 5. the answer to the question: n asks again, q and an empty input cancel
+        @test P.confirm_answers(answers; group = :new, io_in = IOBuffer("n\n"), io_out = IOBuffer()) === false
+        @test P.confirm_answers(answers; group = :new, io_in = IOBuffer("q\n"), io_out = IOBuffer()) === nothing
+        @test P.confirm_answers(answers; group = :new, io_in = IOBuffer(""), io_out = IOBuffer()) === nothing
+        # an input that ends before an answer gives nothing, as in ask_yes_no
+
+        # 6. error case: a group other than :new or :listed is rejected
+        @test_throws ArgumentError P.confirm_answers(answers; group = :rental, io_in = IOBuffer("y\n"), io_out = IOBuffer())
+    end
+
     @testset "get_room_type_options" begin
         # 3 x Entire home/apt, 2 x Private room, 1 x Hotel room; the order is mixed on purpose
         df = DataFrame(room_type = ["Private room", "Entire home/apt", "Hotel room",
