@@ -102,6 +102,7 @@ const CONFIG = (
         exchange_rates = Dict("USD" => 0.89, "EUR" => 1.0),
         # value of 1 unit of the currency in EUR (1 USD = 0.89 EUR)
         # add one line per new currency
+        # USD is kept for cities outside the euro zone (e.g. New York) and for the tests of convert_currency!
         # rates as of 2 Oct 2026, source: Morningstar
     ),
 
@@ -242,11 +243,12 @@ const CONFIG = (
 
     # Known cities, keyed by the value of CITY:
     # center          latitude and longitude of the city center, used by calculate_distance!()
-    # currency        currency of that city's listings file, selects the rate in currency_rules
+    # currency        currency of the prices in that city's listings file; Inside Airbnb gives them in the
+    #                 local currency (the $ sign in the file is only formatting), selects the rate in currency_rules
     cities = Dict(
-        "Athens"    => (center = (latitude = 37.9838, longitude = 23.7275), currency = "USD"),
-        "Barcelona" => (center = (latitude = 41.3851, longitude = 2.1734), currency = "USD"),
-        "Madrid"    => (center = (latitude = 40.4168, longitude = -3.7038), currency = "USD"),
+        "Athens"    => (center = (latitude = 37.9838, longitude = 23.7275), currency = "EUR"),
+        "Barcelona" => (center = (latitude = 41.3851, longitude = 2.1734), currency = "EUR"),
+        "Madrid"    => (center = (latitude = 40.4168, longitude = -3.7038), currency = "EUR"),
     ),
 
     # Configuration for split_dataset!(): share of the listings kept back to test the models
