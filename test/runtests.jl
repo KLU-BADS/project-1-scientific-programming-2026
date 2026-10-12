@@ -2163,6 +2163,13 @@ const P = Project1
         @test result === nothing
         # the screen only prints, so it gives back nothing
 
+        # 1b. happy path: with the city of the menu in fitted, the header names that city instead of CONFIG.city
+        io = IOBuffer()
+        P.visualize_general_findings(merge(analysis, (fitted = (city = "Madrid",),)); io = io, importance = importance)
+        # merge adds the field fitted, as main does before it calls gui; only the city is needed for the header
+        @test occursin("MADRID AIRBNB MARKET · 6 listings", String(take!(io)))
+        # the chosen city is written in capitals, the number of listings stays the same
+
         # 2. happy path: the overview shows the median, the middle half and the median revenue
         @test occursin("Median price per night   €90  (middle half €65 to €115)", output)
         # the six prices 40 to 140: the median is 90, the 25% mark 65 and the 75% mark 115
