@@ -412,7 +412,8 @@ effects per `CONFIG.rating_tips.step` points from the `:price_explain` model (fr
 Without a `:price_explain` model the rating lines are left out.
 
 # Arguments
-- `analysis::NamedTuple`:   The result of `run_analysis_pipeline` with `fits`, `scores`, `df_training` and `df_test`.
+- `analysis::NamedTuple`:   The result of `run_analysis_pipeline` with `fits`, `scores`, `df_training` and `df_test`,
+                            and optionally `fitted` from `run_training_pipeline`, whose `city` names the market in the header.
 - `io::IO`:                 Where the screen is printed (default `stdout`, the terminal).
 - `importance`:             Table from `group_importance` if it was computed before; computed here when `nothing` (default).
 
@@ -427,7 +428,9 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, impor
     # vcat puts the rows of the second table under the rows of the first one
 
     # 2. header: the city and how many listings the findings are based on
-    printstyled(io, "$(uppercase(CONFIG.city)) AIRBNB MARKET · $(nrow(df)) listings\n"; bold = true)
+    city = get(get(analysis, :fitted, (;)), :city, CONFIG.city)
+    # the city chosen in the menu is stored in fitted; without fitted (e.g. in the tests) the city of CONFIG is used
+    printstyled(io, "$(uppercase(city)) AIRBNB MARKET · $(nrow(df)) listings\n"; bold = true)
     println(io, "─"^50)
     # "─"^50 repeats the line character 50 times, the same divider as on the result screen
 
