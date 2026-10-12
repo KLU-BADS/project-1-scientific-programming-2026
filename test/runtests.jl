@@ -73,6 +73,43 @@ const P = Project1
         @test_throws MethodError P.import_user_input(Dict("bedrooms" => 2))
     end
  
+
+    @testset "data_filepath" begin
+        # 1. happy path: the default folder is data/raw of the project, the city name is written in lowercase
+        @test P.data_filepath("Athens") == joinpath(P.PROJECT_ROOT, "data", "raw", "athens_listings.csv")
+
+        # 2. happy path: another folder can be given
+        @test P.data_filepath("Madrid"; data_dir = "somewhere") == joinpath("somewhere", "madrid_listings.csv")
+        # joinpath builds the expected path the same way, so the test works on every system
+
+        # 3. the default path of the config city points at the real data file
+        @test isfile(P.data_filepath(P.CONFIG.city))
+
+        # 4. error case: a city that is not a text does not match the signature
+        @test_throws MethodError P.data_filepath(:Athens)
+    end
+
+    @testset "available_cities" begin
+        # a temporary folder that only has the file of Madrid
+        dir = mktempdir()
+        write(joinpath(dir, "madrid_listings.csv"), "id\n1\n")
+        cities = Dict("Athens" => 1, "Madrid" => 2, "Barcelona" => 3)
+        # only the keys are used, so the values can be anything
+
+        # 1. happy path: only the city with a file is offered
+        @test P.available_cities(cities, dir) == ["Madrid"]
+
+        # 2. happy path: several cities come back sorted alphabetically
+        write(joinpath(dir, "athens_listings.csv"), "id\n1\n")
+        @test P.available_cities(cities, dir) == ["Athens", "Madrid"]
+
+        # 3. edge case: an empty folder gives an empty list
+        @test isempty(P.available_cities(cities, mktempdir()))
+
+        # 4. the real data folder offers at least the config city
+        @test P.CONFIG.city in P.available_cities(P.CONFIG.cities, joinpath(P.PROJECT_ROOT, "data", "raw"))
+    end
+    
     # ------------------------------------------------------------------------------------------
     # data_pre_processing.jl
     # ------------------------------------------------------------------------------------------
@@ -1772,6 +1809,67 @@ const P = Project1
         # log_scale is false, so pct = b, and b is about 3
     end
 
+    @testset "superhost_tip" begin
+        # made-up data like in term_effects: being a Superhost raises the price by exp(0.1) - 1 = 10.52%
+        random_n_generator = P.Random.Xoshiro(42)
+        n = 200
+        is_superhost = rand(random_n_generator, 0:1, n)
+        price = exp.(4.0 .+ 0.1 .* is_superhost .+ 0.001 .* randn(random_n_generator, n))
+        spec = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:is_superhost])
+        fit = P.regression_city(DataFrame(is_superhost = is_superhost, price = price), spec)
+
+        # 1. happy path: a host who is not a Superhost gets the effect in percent
+        @test P.superhost_tip(fit, 0) ≈ 100 * (exp(0.1) - 1) atol = 0.1
+
+        # 2. edge case: a host who is already a Superhost gets no tip
+        @test P.superhost_tip(fit, 1) === nothing
+
+        # 3. edge case: an effect that lowers the price is no tip
+        lower = exp.(4.0 .- 0.1 .* is_superhost .+ 0.001 .* randn(random_n_generator, n))
+        @test P.superhost_tip(P.regression_city(DataFrame(is_superhost = is_superhost, price = lower), spec), 0) === nothing
+
+        # 4. edge case: with alpha = 0 no p-value is small enough, so the effect counts as not significant
+        @test P.superhost_tip(fit, 0; alpha = 0.0) === nothing
+
+        # 5. edge case: a model without a Superhost term gives no tip
+        other_spec = (target = :price, log_scale = true, log1p_predictors = Symbol[], predictors = [:x])
+        @test P.superhost_tip(P.regression_city(DataFrame(x = is_superhost, price = price), other_spec), 0) === nothing
+        # the same numbers under another name: the model has no term called is_superhost
+    end
+
+    @testset "comparable_listings" begin
+        # five made-up listings: A and C lie on the apartment, B about 1 km north, E about 13 km north, D is a private room
+        df_training = DataFrame(room_type = ["Entire home/apt", "Entire home/apt", "Entire home/apt", "Private room", "Entire home/apt"],
+                                bedrooms = [1, 1, 2, 1, 1],
+                                latitude = [37.98, 37.99, 37.98, 37.98, 38.10], longitude = fill(23.73, 5),
+                                district = ["A", "B", "C", "D", "E"], accommodates = [2, 2, 4, 2, 2],
+                                price = [50.0, 60.0, 90.0, 30.0, 70.0], review_scores_rating = [4.5, 4.6, 4.7, 4.8, 4.9])
+        df_row = DataFrame(room_type = ["Entire home/apt"], bedrooms = [1], latitude = [37.98], longitude = [23.73])
+        rule = P.CONFIG.distance_rule
+
+        # 1. happy path: same room type and bedrooms, the nearest first
+        result = P.comparable_listings(df_training, df_row, rule; n = 2)
+        @test result.district == ["A", "B"]
+        @test result.distance_km[1] ≈ 0.0 atol = 1e-9
+        @test issorted(result.distance_km)
+
+        # 2. happy path: only the columns the result screen shows
+        @test names(result) == ["district", "accommodates", "bedrooms", "price", "review_scores_rating", "distance_km"]
+
+        # 3. edge case: fewer than n listings with the same bedrooms, so every listing of the room type is used
+        result = P.comparable_listings(df_training, df_row, rule; n = 4)
+        @test Set(result.district) == Set(["A", "B", "C", "E"])
+        # C has 2 bedrooms and is used now; the private room D is never used
+        @test nrow(P.comparable_listings(df_training, df_row, rule; n = 10)) == 4
+        # n larger than the listings of the room type gives all of them, not an error
+
+        # 4. the training data is not changed
+        @test !hasproperty(df_training, :distance_km)
+
+        # 5. error case: n must be at least 1
+        @test_throws ArgumentError P.comparable_listings(df_training, df_row, rule; n = 0)
+    end
+
     # ------------------------------------------------------------------------------------------
     # visualization.jl
     # ------------------------------------------------------------------------------------------
@@ -2132,6 +2230,35 @@ const P = Project1
         P.visualize_results(new; io = io)
         @test occursin("every answer is limited", String(take!(io)))
         # a new apartment gets the same footer, the limits hold for every result screen
+    end
+
+    @testset "save_report" begin
+        # the same made-up bundle of a listed apartment as in visualize_results
+        result = (group = :listed, level = 0.8, price = (median = 96.0, mean = 101.0, lower = 66.0, upper = 140.0),
+                  nights = 72.0, revenue = (estimate = 7272.0, lower = 4752.0, upper = 10080.0),
+                  current_price = 150.0, assessment = (status = :overpriced, difference = 10.0),
+                  district = "Koukaki", room_type = "Entire home/apt",
+                  tips = DataFrame(amenity = [:has_AC], change = [7.5], change_pct = [7.8]),
+                  rating_tips = DataFrame(score = [:review_scores_cleanliness], pct_per_step = [1.3]))
+        path = joinpath(mktempdir(), "report.txt")
+
+        # 1. happy path: the file is written and its full path comes back
+        @test P.save_report(result, path) == abspath(path)
+        @test isfile(path)
+
+        # 2. happy path: the file has exactly the text of the result screen
+        io = IOBuffer()
+        P.visualize_results(result; io = io)
+        screen = String(take!(io))
+        @test read(path, String) == screen
+
+        # 3. edge case: an existing file is replaced, not appended to
+        write(path, "old text")
+        P.save_report(result, path)
+        @test read(path, String) == screen
+
+        # 4. error case: a folder that does not exist cannot be written to
+        @test_throws SystemError P.save_report(result, joinpath(mktempdir(), "missing", "report.txt"))
     end
 
     @testset "visualize_general_findings" begin
@@ -2523,6 +2650,16 @@ const P = Project1
 
         # 11. a room type without training caps is refused (by cap_values!)
         @test_throws ArgumentError P.run_inference_pipeline(answer_row(room_type = "Hotel room"), fitted)
+
+        # 12. with a city in fitted, the distance is measured from the centre of that city, not of CONFIG.city
+        madrid = P.CONFIG.cities["Madrid"].center
+        madrid_row = answer_row()
+        madrid_row.latitude .= madrid.latitude
+        madrid_row.longitude .= madrid.longitude
+        # .= writes the new value into the existing column, the row stands exactly on the centre of Madrid
+        @test P.run_inference_pipeline(madrid_row, merge(fitted, (city = "Madrid",))).proximity_city_center[1] ≈ 0.0 atol = 1e-9
+        @test P.run_inference_pipeline(madrid_row, fitted).proximity_city_center[1] > 2000
+        # without a city in fitted the same row is measured from Athens, more than 2000 km away
     end
  
     # ------------------------------------------------------------------------------------------
