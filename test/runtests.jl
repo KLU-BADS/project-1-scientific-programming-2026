@@ -2138,8 +2138,12 @@ const P = Project1
         # 150 lies 10 above the upper end 140; the difference comes from the assessment
         @test occursin("possibly overpriced", output)
         # :overpriced has its own message, printed in red
-        @test occursin("Revenue at €101 × your 72 nights   €7,272", output)
-        # the revenue uses the mean price 101 times the 72 booked nights
+        @test occursin("Your revenue at your price €150 × 72 nights   €10,800", output)
+        # the host's own revenue: the current price 150 times the 72 booked nights
+        @test occursin("At the average price €101 × 72 nights   €7,272", output)
+        # the revenue at the mean price of comparable listings, labelled so it is not read as the host's revenue
+        @test !occursin("Revenue at €101 × your", output)
+        # the old line, which looked like the host's own revenue, is gone
         @test occursin("range €4,752 to €10,080", output)
         # a listed apartment has its own booking history, so its revenue gets a range
 
