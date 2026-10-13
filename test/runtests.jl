@@ -2869,6 +2869,43 @@ const P = Project1
         printed = IOBuffer()
         result = P.ask_number("Guests: ", Int, 1, 16; io_in = user_input, io_out = printed)
         @test isnothing(result)
+
+        # 11. edge case: limits with many decimals are shown with at most 3 decimals, in the question and in the message;
+        #     the lower one rounded up, the upper one rounded down, so every number shown is really accepted
+        printed = IOBuffer()
+        result = P.ask_number("Longitude: ", Float64, 2.0877600000000003, 2.2255800000000003, true;
+                              io_in = IOBuffer("1\n2.1\n"), io_out = printed)
+        output = String(take!(printed))
+        @test result == 2.1
+        # 1 is outside the limits and asked again, 2.1 is accepted
+        @test occursin("Longitude [2.088 to 2.225]: ", output)
+        # the question itself shows both limits
+        @test occursin("between 2.088 and 2.225", output)
+        @test !occursin("2.0877600000000003", output)
+        # the long number of the data is not shown anymore
+
+        # 12. edge case: an amount in euros shows its limits in euros with cents
+        printed = IOBuffer()
+        result = P.ask_number("Your current price per night (EUR): ", Float64, 32.82, 370.5, true;
+                              euro = true, io_in = IOBuffer("5\n80\n"), io_out = printed)
+        output = String(take!(printed))
+        @test result == 80.0
+        @test occursin("Your current price per night (EUR) [€32.82 to €370.50]: ", output)
+        @test occursin("between €32.82 and €370.50", output)
+        # format_eur with digits = 2 always writes two decimals, 370.5 becomes €370.50
+
+        # 13. whole numbers are shown unchanged
+        printed = IOBuffer()
+        P.ask_number("Nights: ", Int, 1, 255, true; io_in = IOBuffer("300\n50\n"), io_out = printed)
+        output = String(take!(printed))
+        @test occursin("Nights [1 to 255]: ", output)
+        @test occursin("between 1 and 255", output)
+
+        # 14. edge case: a question without limits stays as it is
+        printed = IOBuffer()
+        P.ask_number("Any number: ", Float64; io_in = IOBuffer("7\n"), io_out = printed)
+        @test String(take!(printed)) == "Any number: "
+        # -Inf and Inf mean "no limit", so nothing is added to the question
     end
 
     @testset "ask_yes_no" begin
