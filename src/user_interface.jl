@@ -351,10 +351,10 @@ function ask_multiple(title::AbstractString, options::AbstractVector{<:Pair})
 end
 
 """
-    ask_number(prompt, T, min_value = -Inf, max_value = Inf, inclusive_interval = false; io_in = stdin, io_out = stdout) -> Union{T, Nothing}
+    ask_number(prompt, T, min_value = -Inf, max_value = Inf, inclusive_interval = false; euro = false, io_in = stdin, io_out = stdout) -> Union{T, Nothing}
 
-User interface in the REPL allowing a user to enter a number. Repeats the question until a valid number in the
-permitted range is entered.
+User interface in the REPL allowing a user to enter a number. The question shows the permitted range, e.g.
+`Guests [1 to 16]: `, and is repeated until a valid number in that range is entered.
 
 # Arguments
 - `prompt::AbstractString`:     Prompt shown to the user.
@@ -363,6 +363,8 @@ permitted range is entered.
 - `max_val::Real`:              Upper boundary of the allowed interval (default `Inf`, no upper boundary).
 - `inclusive_interval::Bool`:   If `true`, `min_val` and `max_val` themselves are allowed (`min_val <= x <= max_val`);
                                 if `false` (default), they are not (`min_val < x < max_val`).
+- `euro::Bool`:                 If `true`, the number is an amount in euros and its limits are shown in euros with cents
+                                (default `false`, limits with at most 3 decimals).
 - `io_in::IO`:                  Input stream (default `stdin`); pass an `IOBuffer` in tests.
 - `io_out::IO`:                 Output stream for the prompt and messages (default `stdout`).
 
@@ -379,10 +381,25 @@ julia> Project1.ask_number("Guests: ", Int, 1, 16, true; io_in = IOBuffer("q\\n"
 true
 ```
 """
-function ask_number(prompt::AbstractString, T::Type{<:Real}, min_value::Real = -Inf, max_value::Real = Inf, inclusive_interval::Bool = false; io_in::IO = stdin, io_out::IO = stdout)
+function ask_number(prompt::AbstractString, T::Type{<:Real}, min_value::Real = -Inf, max_value::Real = Inf, inclusive_interval::Bool = false; euro::Bool = false, io_in::IO = stdin, io_out::IO = stdout)
+    # 1. the limits in a readable form: euros with cents for an amount, at most 3 decimals otherwise;
+    #    the lower limit is rounded up and the upper one down, so every number shown is accepted
+    if euro
+        shown_min = isfinite(min_value) ? format_eur(ceil(min_value; digits = 2); digits = 2) : min_value
+        shown_max = isfinite(max_value) ? format_eur(floor(max_value; digits = 2); digits = 2) : max_value
+    else
+        shown_min = min_value isa AbstractFloat && isfinite(min_value) ? ceil(min_value; digits = 3) : min_value
+        shown_max = max_value isa AbstractFloat && isfinite(max_value) ? floor(max_value; digits = 3) : max_value
+    end
+    # isfinite is false for -Inf and Inf, the defaults without a limit, which stay as they are
+
+    # 2. the question shows both limits, so the user knows the allowed range before typing
+    has_limits = isfinite(min_value) && isfinite(max_value)
+    question = has_limits ? rstrip(prompt, [':', ' ']) * " [$(shown_min) to $(shown_max)]: " : prompt
+    # rstrip removes ": " at the end, so "Guests: " becomes "Guests [1 to 16]: "; without limits the prompt stays unchanged
     while true
         # write prompt to terminal
-        print(io_out, prompt)
+        print(io_out, question)
         # ensure prompt appears before program waits for input
         flush(io_out)
         # stop if the input has ended
@@ -403,7 +420,7 @@ function ask_number(prompt::AbstractString, T::Type{<:Real}, min_value::Real = -
         # check range
         in_range = inclusive_interval ? (value >= min_value && value <= max_value) : (value > min_value && value < max_value)
         in_range && return value
-        println(io_out, "Please enter a number between $(min_value) and $(max_value).")
+        println(io_out, "Please enter a number between $(shown_min) and $(shown_max).")
     end
 end
 
@@ -530,7 +547,9 @@ function ask_numbers!(answers::AbstractDict{Symbol,Any}, rules::AbstractVector{<
     # for each number input governed by an interval get the boundaries and then get the user input, if the input is correct add the user response to answers Dict
     for rule in rules
         (lower_bound, upper_bound) = input_bounds(rule, answers, df_training, plausibility_rules)
-        value = ask_number(rule.prompt, rule.value_type, lower_bound, upper_bound, true; io_in = io_in, io_out = io_out)
+        value = ask_number(rule.prompt, rule.value_type, lower_bound, upper_bound, true;
+                           euro = rule.column in CONFIG.currency_rules.columns, io_in = io_in, io_out = io_out)
+        # the columns that convert_currency! converts are amounts in euros, so their limits are shown in euros
         isnothing(value) && return false
         answers[rule.column] = value
     end
