@@ -53,12 +53,20 @@ The first start installs the packages and takes a few minutes; later starts are 
 No code has to be changed, only the data and the configuration:
 
 1. Download the **detailed** listings file (`listings.csv.gz`) of the city from [Inside Airbnb](https://insideairbnb.com/get-the-data/), unzip it and save it as `data/raw/<city>_listings.csv`, with the city name in lowercase (e.g. `vienna_listings.csv`).
-2. Add the city to `cities` in `src/config.jl` with its centre and the currency of its prices:
+2. Add the city to `cities` in `src/config.jl` (near the end of `CONFIG`) with its centre and the currency of its prices. Each entry is `"Name" => (center = (latitude = ..., longitude = ...), currency = "...")`:
    ```julia
-   "Vienna" => (center = (latitude = 48.2082, longitude = 16.3738), currency = "EUR"),
+   cities = Dict(
+       "Athens"    => (center = (latitude = 37.9838, longitude = 23.7275), currency = "EUR"),
+       ...
+       "Vienna"    => (center = (latitude = 48.2082, longitude = 16.3738), currency = "EUR"),
+   ),
    ```
    The name must match the file name (`"Vienna"` → `vienna_listings.csv`).
-3. Inside Airbnb gives the prices in the **local currency** of the city (the `$` sign in the file is only formatting). For a city outside the euro zone, use its currency code and add its rate to `exchange_rates` in `currency_rules`, e.g. `"GBP" => 1.17` (value of 1 GBP in EUR). All prices in the program are shown in euros.
+3. Inside Airbnb gives the prices in the **local currency** of the city (the `$` sign in the file is only formatting). For a city outside the euro zone, use its currency code in step 2 and add the value of 1 unit of that currency in euros to `exchange_rates` in `currency_rules` (also in `src/config.jl`):
+   ```julia
+   exchange_rates = Dict("USD" => 0.89, "EUR" => 1.0, "GBP" => 1.17),
+   ```
+   All prices in the program are shown in euros.
 4. Start the program: the new city appears in the city menu. Run `julia --project=. -e 'using Pkg; Pkg.test()'` to make sure nothing else changed.
 <!-- DESCRIBE THE ESSENTIAL USAGE ABOVE -->
 
