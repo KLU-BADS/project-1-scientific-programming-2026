@@ -331,10 +331,16 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
         println(io)
     end
 
-    # 5. revenue: the mean price times the booked nights per year
+    # 5. revenue: a listed apartment gets its own revenue and the revenue at the average price, a new one an estimate
     if result.group == :listed
-        println(io, "Revenue at ", format_eur(result.price.mean), " × your ", round(Int, result.nights), " nights   ", format_eur(result.revenue.estimate))
+        nights = round(Int, result.nights)
         # round(Int, ...) shows the nights as a whole number, 72 instead of 72.0
+        println(io, "Your revenue at your price ", format_eur(result.current_price), " × ", nights, " nights   ",
+                format_eur(result.current_price * result.nights))
+        # what the host earns now: the price they charge times their booked nights
+        println(io, "At the average price ", format_eur(result.price.mean), " × ", nights, " nights   ",
+                format_eur(result.revenue.estimate))
+        # what comparable listings earn on average with the same nights; the mean price, because revenue is an expected total
         println(io, "  range ", format_eur(result.revenue.lower), " to ", format_eur(result.revenue.upper))
     else
         println(io, "Expected revenue (rough estimate)   ", format_eur(result.revenue.estimate))
