@@ -22,12 +22,12 @@ julia> Project1.format_eur(7.5; digits = 2)
 """
 function format_eur(x::Real; digits::Int = 0)
     # 1. round x to the wanted number of decimals and turn it into text
-    s = @sprintf("%.*f", digits, x)
+    amount_text = @sprintf("%.*f", digits, x)
     # %.*f = a number with decimals, the * takes how many decimals from digits
     # @sprintf("%.*f", 0, 7272.4) = "7272" and @sprintf("%.*f", 2, 7.5) = "7.50"
 
     # 2. split the text into the whole part and the decimals
-    parts = split(s, ".")
+    parts = split(amount_text, ".")
     whole = parts[1]
     # split("7.50", ".") = ["7", "50"], and split("7272", ".") = ["7272"] when there are no decimals
 
@@ -73,37 +73,37 @@ function range_bar(lower::Real, upper::Real, value::Real; width::Int = 30, curre
     width < 1 && throw(ArgumentError("width must be at least 1, got $width"))
 
     # 2. the bar goes from lower to upper, and is stretched if the current price lies outside
-    lo = lower
-    hi = upper
+    lower_end = lower
+    upper_end = upper
     if !isnothing(current)
-        lo = min(lower, current)
-        hi = max(upper, current)
+        lower_end = min(lower, current)
+        upper_end = max(upper, current)
     end
     # min and max pick the smaller and the larger number, so the current price always fits on the bar
 
     # 3. turn a price into a place on the bar, from 1 (left end) to width (right end)
-    function pos(x)
+    function bar_position(x)
         # a range of zero width cannot be divided, so the marker goes to the middle
-        hi == lo && return cld(width, 2)
-        share = clamp((x - lo) / (hi - lo), 0, 1)
-        # share = how far x is along the bar, 0 at lo and 1 at hi; clamp keeps it between 0 and 1
+        upper_end == lower_end && return cld(width, 2)
+        share = clamp((x - lower_end) / (upper_end - lower_end), 0, 1)
+        # share = how far x is along the bar, 0 at lower_end and 1 at upper_end; clamp keeps it between 0 and 1
         return round(Int, share * (width - 1)) + 1
         # width - 1 steps between the first and the last place, + 1 because Julia counts from 1
     end
 
     # 4. build the bar: spaces, then '=' for the range, then the markers on top
-    chars = fill(' ', width)
+    characters = fill(' ', width)
     # fill(' ', 5) = a vector of 5 spaces
-    chars[pos(lower):pos(upper)] .= '='
+    characters[bar_position(lower):bar_position(upper)] .= '='
     # .= writes '=' into every place from the lower end to the upper end of the range
-    chars[pos(value)] = '●'
+    characters[bar_position(value)] = '●'
     if !isnothing(current)
-        chars[pos(current)] = '▲'
+        characters[bar_position(current)] = '▲'
     end
     # ▲ is set last, so it stays visible when it lands on the same place as ●
 
     # 5. join everything into one text with the euro amounts at both ends
-    return format_eur(lo) * " [" * String(chars) * "] " * format_eur(hi)
+    return format_eur(lower_end) * " [" * String(characters) * "] " * format_eur(upper_end)
 end
 
 """
@@ -163,21 +163,21 @@ function plot_price_by_room_type(df::DataFrame, min_count::Int; io::IO = stdout)
     # 2. keep only the room types with enough listings, the largest first
     counts = counts[counts.n .>= min_count, :]
     sort!(counts, :n, rev = true)
-    rts = counts.room_type
+    room_types = counts.room_type
     # rev = true sorts from large to small, so the most common room type is drawn on top
 
     # 3. stop with a short message if no room type is left, because boxplot cannot draw zero boxes
-    if isempty(rts)
+    if isempty(room_types)
         println(io, "No room type has at least $min_count listings.")
         return nothing
     end
 
     # 4. collect the prices of each kept room type
-    data = [collect(skipmissing(df.price[df.room_type .== rt])) for rt in rts]
-    # for every room type rt, take its prices without empty cells: one vector of plain numbers per box
+    data = [collect(skipmissing(df.price[df.room_type .== room_type])) for room_type in room_types]
+    # for every room_type in room_types, take its prices without empty cells: one vector of plain numbers per box
 
     # 5. draw one box per room type and print the chart
-    chart = boxplot(String.(rts), data; title = "Price by room type", xlabel = "EUR")
+    chart = boxplot(String.(room_types), data; title = "Price by room type", xlabel = "EUR")
     # String.() turns the labels into plain text, because CSV reads them as String15, which boxplot does not accept
     println(io, chart)
 
@@ -248,9 +248,9 @@ function plot_predicted_vs_actual(actual::AbstractVector, predicted::AbstractVec
     chart = scatterplot(actual, predicted; xlabel = "actual EUR", ylabel = "predicted EUR", title = "Test set")
 
     # 3. add the diagonal where predicted equals actual
-    lo, hi = extrema(actual)
-    lineplot!(chart, [lo, hi], [lo, hi])
-    # extrema gives the smallest and the largest value at once, the line goes from (lo, lo) to (hi, hi)
+    lowest, highest = extrema(actual)
+    lineplot!(chart, [lowest, highest], [lowest, highest])
+    # extrema gives the smallest and the largest value at once, the line goes from (lowest, lowest) to (highest, highest)
     # dots above the line were predicted too high, dots below too low
 
     # 4. print the chart
@@ -441,9 +441,9 @@ function visualize_general_findings(analysis::NamedTuple; io::IO = stdout, impor
     # "─"^50 repeats the line character 50 times, the same divider as on the result screen
 
     # 3. overview: the typical price, the middle half of all prices, and the typical yearly revenue
-    q1, q3 = quantile(df.price, [0.25, 0.75])
+    first_quartile, third_quartile = quantile(df.price, [0.25, 0.75])
     println(io, "Median price per night   ", format_eur(median(df.price)),
-            "  (middle half ", format_eur(q1), " to ", format_eur(q3), ")")
+            "  (middle half ", format_eur(first_quartile), " to ", format_eur(third_quartile), ")")
     println(io, "Median yearly revenue    ", format_eur(median(df.estimated_revenue)))
     # quantile at 0.25 and 0.75 gives the two prices between which the middle 50% of all listings lie
     println(io)
