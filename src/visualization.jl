@@ -396,11 +396,12 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
         for row in eachrow(comparables)
             # eachrow goes through the table one row at a time, the columns are read as row.price and so on
             println(io, "  ", rpad(string(row.district), 22), lpad(format_eur(row.price), 7),
-                    lpad(string(row.accommodates), 8), lpad(string(row.bedrooms), 10),
+                    lpad(string(row.accommodates), 8), lpad(string(round(Int, row.bedrooms)), 10),
                     lpad(string(round(Float64(row.review_scores_rating); digits = 1)), 8),
                     lpad(@sprintf("%.1f km", row.distance_km), 10))
             # string() turns the numbers and the compact CSV text type (String15) into plain text, because rpad and lpad work on text;
             # Float64() removes the possible missing from the rating column before it is rounded to one decimal;
+            # round(Int, x) shows the bedrooms as a whole number, 1 instead of 1.0, because the CSV stores them as decimals;
             # @sprintf("%.1f km", x) shows the distance with one decimal and the unit
         end
         println(io)

@@ -2259,11 +2259,11 @@ const P = Project1
         # the bundle listed has neither field: get gives nothing, so the screen works as before
 
         # 15. happy path: the similar listings are printed as a table with real-shaped columns
-        comparables = DataFrame(district = ["Pangrati", "Exarchia"], accommodates = [2, 4], bedrooms = [1, 2],
+        comparables = DataFrame(district = ["Pangrati", "Exarchia"], accommodates = [2, 4], bedrooms = [1.0, 2.0],
                                 price = Union{Missing, Float64}[88.0, 104.0],
                                 review_scores_rating = Union{Missing, Float64}[4.8, 4.6],
                                 distance_km = [0.4, 1.2])
-        # price and rating are Union{Missing, Float64}, like the columns that come from the CSV
+        # price and rating are Union{Missing, Float64} and the bedrooms are decimals, like the columns that come from the CSV
         with_comparables = merge(listed, (comparables = comparables,))
         io = IOBuffer()
         P.visualize_results(with_comparables; io = io)
@@ -2271,7 +2271,7 @@ const P = Project1
         @test occursin("Similar listings nearby", output)
         # the table has its own heading
         @test occursin("  " * rpad("Pangrati", 22) * lpad("€88", 7) * lpad("2", 8) * lpad("1", 10) * lpad("4.8", 8) * lpad("0.4 km", 10), output)
-        # one row per listing, each column padded to the width of its heading
+        # one row per listing, each column padded to the width of its heading, the bedrooms as the whole number 1 and not 1.0
         @test occursin("Exarchia", output) && occursin("€104", output) && occursin("1.2 km", output)
         # the second listing is printed too, with its price and its distance
         @test findfirst("Similar listings nearby", output).start < findfirst("Based on comparable listings", output).start
