@@ -1,10 +1,11 @@
 """
     run_training_pipeline(filepath = CONFIG.filepath; city = CONFIG.city) -> NamedTuple
 
-Run data pre-processing pipeline for the training data used in the regression model. Import the listings.csv 
-file into a DataFrame and run all pre-processing steps in the order of the design: select columns, rename, 
-set types, remove duplicates and listings without bookings, handle missing values, remove zero denominators 
-and outliers,  create dummies, ratios and the distance to the city center. Every step is controlled by `CONFIG`.
+Run the pre-processing pipeline for the training data of the regression models. Import the listings file into
+a DataFrame and run all pre-processing steps in the order of the design: select columns, rename, set types, convert
+the currency, remove duplicates and listings without bookings, handle missing values, remove zero denominators,
+outliers and implausible sizes, cap the sizes, create dummies, ratios and the distance to the city center, group
+rare districts and add the centred squares. Every step is controlled by `CONFIG`.
 
 # Arguments
 - `filepath::String`:   path of the listings file (default `CONFIG.filepath`), e.g. `data_filepath(city)`.
@@ -16,7 +17,7 @@ Returns a named tuple `(df, fitted)`:
   apartment: `caps` (upper limits per room type), `kept_districts` (districts that are not grouped as rare),
   `square_centers` (the centres of the squared columns) and `city` (the city the data belongs to).
 
-<!-- TODO: add an `# Examples` section with a jldoctest once this function is implemented. -->
+No example here: the function reads a whole listings file, so its use is shown in the tests.
 """
 function run_training_pipeline(filepath::String = CONFIG.filepath; city::String = CONFIG.city)
     df = import_csv(filepath)
@@ -146,7 +147,7 @@ function run_prediction_pipeline(analysis::NamedTuple, df::DataFrame, group::Sym
     # 7b. the most similar listings of the training data, shown next to the price range
     comparables = comparable_listings(analysis.df_training, df, CONFIG.distance_rule)
     # same room type and bedrooms, the nearest first; df still has latitude and longitude (delete = false)
-    
+
     # 8. one bundle with every number of the screen
     # the field names are exactly the ones visualize_results reads
     return (group = group, level = CONFIG.interval_level, price = price, nights = nights, revenue = revenue,
@@ -212,7 +213,7 @@ function run_inference_pipeline(df_input::DataFrame, fitted::NamedTuple)
     df_inference = copy(df_input)
     cap_values!(df_inference, fitted.caps, CONFIG.cap_rules)
     for rule in CONFIG.ratio_rules
-        if hasproperty(df_inference, rule.numerator) 
+        if hasproperty(df_inference, rule.numerator)
             if rule.denominator isa Real || hasproperty(df_inference, rule.denominator)
                 calculate_ratio!(df_inference, rule)
             end
