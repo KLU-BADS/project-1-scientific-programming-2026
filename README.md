@@ -37,7 +37,9 @@ Start the program from a terminal in the project folder:
 julia src/main.jl
 ```
 
-The first start installs the packages and takes a few minutes; later starts are faster. The menus need a real terminal (arrow keys, Enter, `q` to leave).
+**Requirements:** [Julia](https://julialang.org/downloads/) 1.12 or newer (tested with Julia 1.12.7) and an internet connection for the first start. No other installation is needed.
+
+The first start installs all packages by itself and takes a few minutes; later starts are faster. Wait until the "Which city?" menu appears. The menus need a real terminal (macOS Terminal, Linux shell, or the terminal in VS Code), not a notebook or output pane. Use the arrow keys, Enter, and `q` to leave.
 
 1. **Which city?** Choose one of the cities whose listings file is in `data/raw` (currently Athens, Barcelona and Madrid). The program then cleans the data and fits the models.
 2. **Main menu**
