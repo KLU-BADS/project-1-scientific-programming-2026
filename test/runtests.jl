@@ -2177,8 +2177,8 @@ const P = Project1
         output = String(take!(io))
         @test occursin("+ Air conditioning   +€7.50 per night (+7.8%)", output)
         # :has_AC gets its label from CONFIG.amenity_labels, the change is shown with 2 decimals
-        @test occursin("Listings rated 0.1 higher for cleanliness charge about 1.3% more.", output)
-        # the score loses its review_scores_ prefix, and the step 0.1 comes from CONFIG.rating_tips
+        @test occursin("Listings rated 0.1 higher for cleanliness rating charge about 1.3% more.", output)
+        # the score is named by CONFIG.term_labels, the same name as on the findings screen, and the step 0.1 comes from CONFIG.rating_tips
         @test occursin("Based on comparable listings, not a guarantee.", output)
         # the footer closes every result screen
 
@@ -2234,6 +2234,72 @@ const P = Project1
         P.visualize_results(new; io = io)
         @test occursin("every answer is limited", String(take!(io)))
         # a new apartment gets the same footer, the limits hold for every result screen
+
+        # 13. happy path: the Superhost tip is printed after the amenity tips
+        with_superhost = merge(listed, (superhost = 2.6,))
+        io = IOBuffer()
+        P.visualize_results(with_superhost; io = io)
+        output = String(take!(io))
+        @test occursin("+ Become a Superhost   about +2.6% on the price", output)
+        # the effect is shown in percent with one decimal
+        @test findfirst("Air conditioning", output).start < findfirst("Become a Superhost", output).start
+        # the Superhost tip follows the amenity tips
+
+        # 14. edge case: no Superhost line when there is no tip, and no table for a bundle without the new fields
+        no_superhost = merge(listed, (superhost = nothing,))
+        io = IOBuffer()
+        P.visualize_results(no_superhost; io = io)
+        @test !occursin("Superhost", String(take!(io)))
+        # nothing means the host already is a Superhost or the effect is not clear, so nothing is printed
+        io = IOBuffer()
+        P.visualize_results(listed; io = io)
+        output = String(take!(io))
+        @test !occursin("Superhost", output)
+        @test !occursin("Similar listings nearby", output)
+        # the bundle listed has neither field: get gives nothing, so the screen works as before
+
+        # 15. happy path: the similar listings are printed as a table with real-shaped columns
+        comparables = DataFrame(district = ["Pangrati", "Exarchia"], accommodates = [2, 4], bedrooms = [1, 2],
+                                price = Union{Missing, Float64}[88.0, 104.0],
+                                review_scores_rating = Union{Missing, Float64}[4.8, 4.6],
+                                distance_km = [0.4, 1.2])
+        # price and rating are Union{Missing, Float64}, like the columns that come from the CSV
+        with_comparables = merge(listed, (comparables = comparables,))
+        io = IOBuffer()
+        P.visualize_results(with_comparables; io = io)
+        output = String(take!(io))
+        @test occursin("Similar listings nearby", output)
+        # the table has its own heading
+        @test occursin("  " * rpad("Pangrati", 22) * lpad("€88", 7) * lpad("2", 8) * lpad("1", 10) * lpad("4.8", 8) * lpad("0.4 km", 10), output)
+        # one row per listing, each column padded to the width of its heading
+        @test occursin("Exarchia", output) && occursin("€104", output) && occursin("1.2 km", output)
+        # the second listing is printed too, with its price and its distance
+        @test findfirst("Similar listings nearby", output).start < findfirst("Based on comparable listings", output).start
+        # the table comes before the footer
+
+        # 16. edge case: an empty table prints no heading
+        no_comparables = merge(listed, (comparables = comparables[1:0, :],))
+        io = IOBuffer()
+        P.visualize_results(no_comparables; io = io)
+        @test !occursin("Similar listings nearby", String(take!(io)))
+        # comparables[1:0, :] has the columns but no rows, so there is nothing to show
+
+        # 17. edge case: the district name _other is shown in words
+        rare = merge(listed, (district = "_other",))
+        io = IOBuffer()
+        P.visualize_results(rare; io = io)
+        output = String(take!(io))
+        @test occursin("YOUR LISTING · other districts, Entire home/apt", output)
+        # districts that were too rare in the training data are grouped as _other, which a user should not see
+        @test !occursin("_other", output)
+        # the raw name appears nowhere on the screen
+
+        # 18. edge case: a rating without a label in CONFIG.term_labels keeps its column name
+        unlabelled = merge(listed, (rating_tips = DataFrame(score = [:review_scores_location], pct_per_step = [0.9]),))
+        io = IOBuffer()
+        P.visualize_results(unlabelled; io = io)
+        @test occursin("higher for review_scores_location charge about 0.9% more.", String(take!(io)))
+        # get falls back to the column name, so a new rating column still prints something useful
     end
 
     @testset "save_report" begin
