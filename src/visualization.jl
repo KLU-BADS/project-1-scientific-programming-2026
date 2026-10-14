@@ -263,13 +263,15 @@ end
     visualize_results(result; io = stdout)
 
 Print the result screen for one apartment: the typical price and its range, for a listed apartment
-the assessment of its current price, the expected revenue, and tips to raise the price.
+the assessment of its current price, the expected revenue, tips to raise the price, and the most similar listings.
 
 # Arguments
 - `result::NamedTuple`: The bundle from `run_prediction_pipeline` with the fields `group` (`:new` or `:listed`),
                         `level`, `price` (`median`, `mean`, `lower`, `upper`), `nights`, `revenue`
                         (`estimate`, `lower`, `upper`), `current_price`, `assessment` (`status`, `difference`),
-                        `district`, `room_type`, `tips` and `rating_tips`.
+                        `district`, `room_type`, `tips` and `rating_tips`. The fields `superhost` (the effect of becoming a
+                        Superhost in percent, or `nothing`) and `comparables` (the table of similar listings) are optional:
+                        a bundle without them prints no Superhost tip and no table.
 - `io::IO`:             Where the screen is printed (default `stdout`, the terminal).
 
 # Throws
@@ -285,7 +287,9 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
     # 1. header: a listed or a new apartment, then where it is and what kind of place it is
     title = result.group == :listed ? "YOUR LISTING" : "NEW LISTING"
     # cond ? a : b = a if the condition is true, otherwise b (a short if-else in one line)
-    printstyled(io, "$title · $(result.district), $(result.room_type)\n"; bold = true)
+    district = result.district == "_other" ? "other districts" : result.district
+    # "_other" is the name of the districts that had too few listings in the training data, so it is shown in words
+    printstyled(io, "$title · $district, $(result.room_type)\n"; bold = true)
     println(io, "─"^50)
     # "─"^50 repeats the line character 50 times, a string to the power n means n copies
 
@@ -361,16 +365,51 @@ function visualize_results(result::NamedTuple; io::IO = stdout)
     # first(table, 3) keeps the first 3 rows; the tips are already sorted from the largest effect down
     # CONFIG.amenity_labels turns the column name :has_AC into the readable "Air conditioning"
 
+    superhost = get(result, :superhost, nothing)
+    # get gives nothing when the bundle has no superhost field, so a bundle from before this field still works
+    if !isnothing(superhost)
+        println(io, "  + Become a Superhost   about +", round(superhost; digits = 1), "% on the price")
+        # round(2.64; digits = 1) gives 2.6, the effect in percent with one decimal like the other tips
+    end
+    # isnothing(x) is true when x is nothing; superhost is nothing when the host already is one or the effect is not clear,
+    # then no line is printed
+
     step = CONFIG.rating_tips.step
     # step is how much higher a rating is compared, e.g. 0.1 points on the 1 to 5 scale
     for row in eachrow(result.rating_tips)
-        name = replace(String(row.score), "review_scores_" => "")
+        name = get(CONFIG.term_labels, String(row.score), String(row.score))
         println(io, "  Listings rated $step higher for $name charge about $(round(row.pct_per_step; digits = 1))% more.")
     end
-    # replace cuts the prefix, so :review_scores_cleanliness becomes "cleanliness"
+    # CONFIG.term_labels gives the same readable name as the findings screen, e.g. "cleanliness rating";
+    # a score without a label keeps its column name
     println(io)
 
-    # 7. footer: the numbers describe comparable listings, they do not promise anything
+    # 7. the most similar listings, as a small table
+    comparables = get(result, :comparables, nothing)
+    # get gives nothing when the bundle has no comparables field, so a bundle from before this field still works
+    if !isnothing(comparables) && nrow(comparables) > 0
+        # && needs both: a table that exists and has at least one row; nrow counts the rows of a table
+        println(io, "Similar listings nearby")
+        println(io, "  ", rpad("District", 22), lpad("Price", 7), lpad("Guests", 8), lpad("Bedrooms", 10),
+                lpad("Rating", 8), lpad("Distance", 10))
+        # the heading row: rpad fills a text with spaces on the right, lpad on the left, up to the given width
+        for row in eachrow(comparables)
+            # eachrow goes through the table one row at a time, the columns are read as row.price and so on
+            println(io, "  ", rpad(string(row.district), 22), lpad(format_eur(row.price), 7),
+                    lpad(string(row.accommodates), 8), lpad(string(round(Int, row.bedrooms)), 10),
+                    lpad(string(round(Float64(row.review_scores_rating); digits = 1)), 8),
+                    lpad(@sprintf("%.1f km", row.distance_km), 10))
+            # string() turns the numbers and the compact CSV text type (String15) into plain text, because rpad and lpad work on text;
+            # Float64() removes the possible missing from the rating column before it is rounded to one decimal;
+            # round(Int, x) shows the bedrooms as a whole number, 1 instead of 1.0, because the CSV stores them as decimals;
+            # @sprintf("%.1f km", x) shows the distance with one decimal and the unit
+        end
+        println(io)
+    end
+    # the same widths as in the heading row make every value stand under its heading;
+    # no table is printed when there are no similar listings
+
+    # 8. footer: the numbers describe comparable listings, they do not promise anything
     println(io, "Based on comparable listings, not a guarantee.")
     # the same sentence closes every result screen, for a new and a listed apartment
     println(io, "  The model scores come from one random split; another split gives slightly different values.")

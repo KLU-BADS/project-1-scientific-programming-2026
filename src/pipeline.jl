@@ -69,7 +69,10 @@ revenue, for a listed apartment the assessment of its current price, and the tip
 
 Returns the bundle for `visualize_results`: `group`, `level`, `price` (`median`, `mean`, `lower`, `upper`),
 `nights`, `revenue` (`estimate`, `lower`, `upper`), `current_price`, `assessment` (`status`, `difference`),
-`district`, `room_type`, `tips` and `rating_tips`.
+`district`, `room_type`, `tips`, `rating_tips`, `superhost` and `comparables`.
+
+`superhost` is the price effect in percent of becoming a Superhost, from `superhost_tip`, or `nothing`.
+`comparables` is the table of the most similar listings from `comparable_listings`.
 
 The tips come from `amenity_effects` on the `:price` model: the amenities of `CONFIG.actionable_amenities`
 the apartment does not have yet, with a significant effect of at least `CONFIG.min_effect_pct` percent.
