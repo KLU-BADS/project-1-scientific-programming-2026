@@ -251,7 +251,7 @@ const CONFIG = (
         "Madrid"    => (center = (latitude = 40.4168, longitude = -3.7038), currency = "EUR"),
     ),
 
-    # Configuration for split_dataset!(): share of the listings kept back to test the models
+    # Configuration for split_dataset(): share of the listings kept back to test the models
     # (0.2 = 20%); the seed makes the split reproducible.
     test_size = 0.2,
     split_seed = 42,

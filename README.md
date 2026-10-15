@@ -11,7 +11,7 @@
 
 <!-- DESCRIBE PROJECT PURPOSE BELOW -->
 
-This project uses Inside Airbnb listing data, starting with Athens, Greece, with the design allowing more cities to be added later, to estimate a fair nightly price and expected yearly revenue for an apartment, based on features like bedrooms, bathrooms, amenities and location, plus host details like superhost status. It's aimed at hosts and investors deciding what to charge or whether to list a property, and at guests checking whether a listing is priced fairly.
+This project uses Inside Airbnb listing data of a city (currently Athens, Barcelona and Madrid; more cities can be added, see below) to estimate a fair nightly price and expected yearly revenue for an apartment, based on features like bedrooms, bathrooms, amenities and location, plus host details like Superhost status. It's aimed at hosts and investors deciding what to charge or whether to list a property, and at guests checking whether a listing is priced fairly.
 
 <!-- DESCRIBE PROJECT PURPOSE ABOVE  -->
 

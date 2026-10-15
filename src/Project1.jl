@@ -1,7 +1,8 @@
 """
     Project1
 
-A minimal Julia package to start a project from.
+HostWise: estimate a fair nightly price and the yearly revenue of an apartment from the Inside Airbnb listings
+of a city. Start the program with `julia src/main.jl`.
 """
 module Project1
 
